@@ -27,6 +27,10 @@ src/gnss_monitor/framing/__init__.py
 src/gnss_monitor/framing/framer.py
 src/gnss_monitor/geo/__init__.py
 src/gnss_monitor/geo/distance.py
+src/gnss_monitor/live/__init__.py
+src/gnss_monitor/live/controller.py
+src/gnss_monitor/live/dashboard.py
+src/gnss_monitor/live/worker.py
 src/gnss_monitor/model/__init__.py
 src/gnss_monitor/model/messages.py
 src/gnss_monitor/model/sentence.py
@@ -34,6 +38,7 @@ src/gnss_monitor/monitor/__init__.py
 src/gnss_monitor/monitor/controller.py
 src/gnss_monitor/monitor/dashboard.py
 src/gnss_monitor/monitor/evaluator.py
+src/gnss_monitor/monitor/receiver_monitor.py
 src/gnss_monitor/parsing/__init__.py
 src/gnss_monitor/parsing/parser.py
 src/gnss_monitor/sources/__init__.py
@@ -42,8 +47,12 @@ src/gnss_monitor/sources/file_source.py
 src/gnss_monitor/sources/serial_source.py
 tests/test_bus.py
 tests/test_config.py
+tests/test_distance.py
 tests/test_evaluator.py
 tests/test_file_source.py
 tests/test_framer.py
 tests/test_integration_replay.py
+tests/test_live_controller.py
+tests/test_live_worker.py
 tests/test_parser.py
+tests/test_receiver_monitor.py

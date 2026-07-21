@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from gnss_monitor.framing import Framer
-from gnss_monitor.model import GGAMessage, RMCMessage
+from gnss_monitor.model import FixQuality, GGAMessage, RMCMessage
 from gnss_monitor.parsing import NmeaParser
 from gnss_monitor.sources.base import NMEASource
 
@@ -24,6 +24,7 @@ class ReceiverState:
     sentences_seen: int = 0
     valid_checksums: int = 0
     has_fix: bool = False
+    fix_quality: Optional[FixQuality] = None
     latitude_deg: Optional[float] = None
     longitude_deg: Optional[float] = None
     altitude_m: Optional[float] = None
@@ -87,6 +88,7 @@ class ReceiverMonitor:
                 and message.longitude_deg is not None
             ):
                 self.state.has_fix = True
+                self.state.fix_quality = message.fix_quality
                 self.state.latitude_deg = message.latitude_deg
                 self.state.longitude_deg = message.longitude_deg
                 self.state.altitude_m = message.altitude_m

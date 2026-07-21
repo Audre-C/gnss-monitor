@@ -30,7 +30,7 @@ channels:
     antenna: "BT-104"
     source:
       type: file
-      path: data/nmea_logs/GHA20P-SSI-0720_142510_COM24.log
+      path: data\nmea_logs\GHA20P-SSI-0721_091454_COM24.log
 
   - id: lc29h_1
     module: "Quectel LC29HEA"
@@ -38,7 +38,7 @@ channels:
     antenna: "BT-104L5"
     source:
       type: file
-      path: data/nmea_logs/GHA20P-SSI-0720_143330_COM21.log
+      path: data\nmea_logs\GHA20P-SSI-0721_091408_COM21.log
     expected:
       position_tolerance_m: 50.0    # tighter tolerance for RTK-capable unit
 
@@ -48,4 +48,4 @@ channels:
     antenna: "BT-460D"
     source:
       type: file
-      path: data/nmea_logs/GHA20P-SSI-0720_143953_COM23.log
+      path: data\nmea_logs\GHA20P-SSI-0721_091429_COM23.log

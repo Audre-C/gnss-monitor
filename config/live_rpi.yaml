@@ -1,0 +1,55 @@
+# GNSS Monitor - Live mode (Raspberry Pi / Linux) configuration.
+#
+# Identical to config/live_windows.yaml except for the serial device
+# names. This file is the ONLY thing that changes when moving from the
+# Windows bench to the Pi deployment. Confirm the /dev/ttyUSB* ordering
+# with `ls -l /dev/serial/by-id/` and prefer stable by-id paths in
+# production to avoid USB enumeration order surprises.
+
+app:
+  name: gnss-monitor
+  log_dir: logs
+  diagnostics_level: INFO
+
+site:
+  name: "Teleport Rooftop"
+  expected:
+    latitude_deg: 25.334373
+    longitude_deg: 51.469359
+    position_tolerance_m: 100.0
+    altitude_m: 40.0
+    altitude_tolerance_m: 30.0
+    max_speed_mps: 1.0
+    receiver_timeout_s: 10.0
+    min_satellites: 4
+    max_hdop: 5.0
+
+channels:
+  - id: neo6m_1
+    module: "u-blox NEO-6M"
+    name: "u-blox NEO-6M"
+    antenna: "BT-104"
+    source:
+      type: serial
+      port: /dev/ttyUSB0
+      baud: 9600
+
+  - id: lc29h_1
+    module: "Quectel LC29HEA"
+    name: "Quectel LC29HEA"
+    antenna: "BT-104L5"
+    source:
+      type: serial
+      port: /dev/ttyUSB1
+      baud: 460800
+    expected:
+      position_tolerance_m: 50.0
+
+  - id: neom10_1
+    module: "Quescan NeoM101612F"
+    name: "NeoM101612F"
+    antenna: "BT-460D"
+    source:
+      type: serial
+      port: /dev/ttyUSB2 #tentative
+      baud: 38400
