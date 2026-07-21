@@ -1,9 +1,11 @@
 """Command-line entry point.
 
-Phase 1 scope: load and validate the configuration, initialise
-diagnostics logging, and print a summary of the configured channels
-including each channel's effective expected baseline. Later phases will
-start the acquisition pipeline from here.
+Modes:
+    (default)   run the Simple Mode health monitor (Phase 3).
+    --check     validate configuration, print a summary, and exit.
+    --once      run a single pass (process all data, render one frame,
+                exit) instead of the continuously refreshing dashboard.
+                Useful for headless checks and CI.
 """
 
 from __future__ import annotations
@@ -14,9 +16,11 @@ import sys
 from gnss_monitor import __version__
 from gnss_monitor.config import ConfigError, RootConfig, load_config
 from gnss_monitor.logging_setup import setup_logging
+from gnss_monitor.monitor import SimpleModeController, TerminalDashboard
 
 EXIT_OK = 0
 EXIT_CONFIG_ERROR = 2
+EXIT_RUNTIME_ERROR = 3
 
 
 def _build_argument_parser() -> argparse.ArgumentParser:
@@ -36,6 +40,23 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         "--check",
         action="store_true",
         help="Validate the configuration and exit without running.",
+    )
+    parser.add_argument(
+        "--once",
+        action="store_true",
+        help="Process all data, render a single frame, then exit.",
+    )
+    parser.add_argument(
+        "--tick",
+        type=float,
+        default=0.5,
+        help="Seconds between dashboard refreshes (default: 0.5).",
+    )
+    parser.add_argument(
+        "--batch",
+        type=int,
+        default=50,
+        help="Lines read per receiver per tick (default: 50).",
     )
     parser.add_argument(
         "--version",
@@ -61,7 +82,7 @@ def _print_config_summary(config: RootConfig) -> None:
         else:
             source_text = f"serial  {source.port} @ {source.baud} baud"
 
-        print(f"  [{channel.id}]")
+        print(f"  [{channel.id}]  {channel.display_name}")
         print(f"    Module            : {channel.module}")
         if channel.antenna is not None:
             print(f"    Antenna           : {channel.antenna}")
@@ -101,17 +122,34 @@ def main(argv: list[str] | None = None) -> int:
         len(config.channels),
     )
 
-    _print_config_summary(config)
-
     if args.check:
+        _print_config_summary(config)
         print("Configuration is valid.")
         return EXIT_OK
 
-    # Phase 1 ends here. Phase 3 will construct and run the
-    # acquisition pipeline (channels, bus, consumers) at this point.
-    logger.info(
-        "Phase 1 build: pipeline not yet implemented, exiting cleanly."
+    # --once processes everything in a single non-clearing pass; the
+    # default clears and refreshes on an interval.
+    tick = 0.0 if args.once else args.tick
+    dashboard = TerminalDashboard(clear=not args.once)
+
+    controller = SimpleModeController(
+        config=config,
+        dashboard=dashboard,
+        tick_interval_s=tick,
+        lines_per_tick=args.batch,
+        once=args.once,
     )
+
+    try:
+        controller.run()
+    except KeyboardInterrupt:
+        logger.info("Interrupted by user; shutting down.")
+        return EXIT_OK
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Runtime error: {exc}", file=sys.stderr)
+        logger.error("Runtime error: %s", exc)
+        return EXIT_RUNTIME_ERROR
+
     return EXIT_OK
 
 

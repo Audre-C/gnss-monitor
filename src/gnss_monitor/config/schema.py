@@ -177,6 +177,11 @@ class ChannelConfig(StrictModel):
         description="Human-readable receiver module name, "
         "e.g. 'u-blox NEO-6M'."
     )
+    name: Optional[str] = Field(
+        default=None,
+        description="Short display label for the dashboard, e.g. 'GPS'. "
+        "Falls back to the module, then the id, when unset.",
+    )
     antenna: Optional[str] = Field(
         default=None,
         description="Human-readable antenna description, e.g. 'BT-104'.",
@@ -186,6 +191,11 @@ class ChannelConfig(StrictModel):
         default=None,
         description="Optional per-channel overrides of the site baseline.",
     )
+
+    @property
+    def display_name(self) -> str:
+        """The label to show in the dashboard for this receiver."""
+        return self.name or self.module or self.id
 
 
 # ---------------------------------------------------------------------------
