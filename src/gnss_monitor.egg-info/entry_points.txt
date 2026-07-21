@@ -1,0 +1,2 @@
+[console_scripts]
+gnss-monitor = gnss_monitor.cli:main
