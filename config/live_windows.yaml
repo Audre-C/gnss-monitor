@@ -1,10 +1,10 @@
 # GNSS Monitor - Live mode (Windows COM ports) configuration.
 #
-# Live monitoring of all three receivers through the Waveshare USB-to-8CH
-# TTL adapter. Replace site.expected with the surveyed rooftop position
-# before real use. To deploy on the Raspberry Pi, copy this file and change
-# only the source.port values (COM24 -> /dev/ttyUSB0, etc.); no code or
-# other settings change. See config/live_rpi.yaml.
+# Four receivers, each configured (externally, at boot) to track a single
+# GNSS constellation. Replace site.expected with the surveyed rooftop
+# position before real use. To deploy on the Raspberry Pi, copy this file
+# and change only the source.port values; no code or other settings
+# change. See config/live_rpi.yaml.
 
 app:
   name: gnss-monitor
@@ -27,16 +27,28 @@ site:
 channels:
   - id: neo6m_1
     module: "u-blox NEO-6M"
-    name: "u-blox NEO-6M"
+    name: "NEO-6M"
+    constellation: "GPS"
     antenna: "BT-104"
     source:
       type: serial
       port: COM24
       baud: 9600
 
+  - id: neom10_1
+    module: "Quescan NeoM101612F"
+    name: "NeoM10"
+    constellation: "GLONASS"
+    antenna: "BT-460D"
+    source:
+      type: serial
+      port: COM23
+      baud: 38400
+
   - id: lc29h_1
     module: "Quectel LC29HEA"
-    name: "Quectel LC29HEA"
+    name: "LC29HEA"
+    constellation: "Galileo"
     antenna: "BT-104L5"
     source:
       type: serial
@@ -45,11 +57,12 @@ channels:
     expected:
       position_tolerance_m: 50.0
 
-  - id: neom10_1
-    module: "Quescan NeoM101612F"
-    name: "NeoM101612F"
+  - id: vollgo_1
+    module: "VOLLGO VG7779T156N0MA"
+    name: "VOLLGO"
+    constellation: "BeiDou"
     antenna: "BT-460D"
     source:
       type: serial
-      port: COM23
-      baud: 38400
+      port: COM19
+      baud: 9600

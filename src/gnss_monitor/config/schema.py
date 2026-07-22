@@ -182,6 +182,12 @@ class ChannelConfig(StrictModel):
         description="Short display label for the dashboard, e.g. 'GPS'. "
         "Falls back to the module, then the id, when unset.",
     )
+    constellation: Optional[str] = Field(
+        default=None,
+        description="GNSS constellation this receiver is configured to "
+        "track, e.g. 'GPS', 'GLONASS', 'Galileo', 'BeiDou'. Display/label "
+        "only; the pipeline is constellation-agnostic.",
+    )
     antenna: Optional[str] = Field(
         default=None,
         description="Human-readable antenna description, e.g. 'BT-104'.",
@@ -196,6 +202,11 @@ class ChannelConfig(StrictModel):
     def display_name(self) -> str:
         """The label to show in the dashboard for this receiver."""
         return self.name or self.module or self.id
+
+    @property
+    def display_constellation(self) -> str:
+        """The GNSS constellation label to show, or '-' if unset."""
+        return self.constellation or "-"
 
 
 # ---------------------------------------------------------------------------

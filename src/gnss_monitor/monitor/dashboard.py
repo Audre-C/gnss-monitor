@@ -1,9 +1,10 @@
-"""Terminal dashboard for Simple Mode.
+"""Terminal dashboard for Simple Mode (replay).
 
-Renders a clean, refreshable table of receiver health. Rendering is
-decoupled from monitoring and evaluation: the controller passes in the
-expected baseline and a list of MonitorView rows, and the dashboard is
-responsible only for turning those into text.
+Renders a clean, refreshable table of receiver health with the same
+column set as the live dashboard (Receiver, GNSS, Status, Latitude,
+Longitude), so both modes look consistent. Rendering is decoupled from
+monitoring and evaluation: the controller passes in the expected baseline
+and a list of MonitorView rows.
 
 Two implementations are provided:
     * TerminalDashboard - clears the screen and prints a frame each tick.
@@ -20,10 +21,10 @@ from typing import Optional, Sequence
 from gnss_monitor.config.schema import ExpectedBaseline
 from gnss_monitor.monitor.evaluator import EvaluationResult, HealthStatus
 
-_WIDTH = 50
-_NAME_COL = 16
+_WIDTH = 70
 _OK_MARK = "\u2713"  # check mark
 _FAIL_MARK = "\u2717"  # ballot X
+_WAIT_MARK = "\u2026"
 
 
 def _fit(text: str, width: int) -> str:
@@ -35,12 +36,23 @@ def _fit(text: str, width: int) -> str:
     return text[: width - 1] + "\u2026"
 
 
+def _coord_cell(value: Optional[float]) -> str:
+    return "-" if value is None else f"{value:.6f}"
+
+
 @dataclass(frozen=True)
 class MonitorView:
-    """A single row of the dashboard."""
+    """A single row of the dashboard.
+
+    constellation and latitude/longitude carry defaults so older callers
+    constructing MonitorView(name, result) keep working.
+    """
 
     name: str
     result: EvaluationResult
+    constellation: str = "-"
+    latitude_deg: Optional[float] = None
+    longitude_deg: Optional[float] = None
 
 
 class Dashboard(ABC):
@@ -91,14 +103,10 @@ class TerminalDashboard(Dashboard):
         if result.status is HealthStatus.OK:
             return f"{_OK_MARK} OK"
         if result.status is HealthStatus.NO_DATA:
-            return f"{_FAIL_MARK} NO DATA"
+            return f"{_WAIT_MARK} WAIT"
+        if result.distance_m is None:
+            return f"{_FAIL_MARK} NO FIX"
         return f"{_FAIL_MARK} FAIL"
-
-    @staticmethod
-    def _distance_cell(distance_m: Optional[float]) -> str:
-        if distance_m is None:
-            return "-"
-        return f"{distance_m:.1f} m"
 
     def render_frame(
         self,
@@ -107,24 +115,29 @@ class TerminalDashboard(Dashboard):
     ) -> str:
         bar = "=" * _WIDTH
         rule = "-" * _WIDTH
+        header = (
+            f"{'Receiver':<13}{'GNSS':<11}{'Status':<11}"
+            f"{'Latitude':<14}{'Longitude':<14}"
+        )
         lines = [
             bar,
             "GNSS HEALTH MONITOR (Simple Mode)",
             bar,
             "Expected Position",
-            f"  {baseline.latitude_deg:.6f}",
-            f"  {baseline.longitude_deg:.6f}",
-            "Allowed Radius",
-            f"  {baseline.position_tolerance_m:.0f} m",
+            f"  Latitude : {baseline.latitude_deg:.6f}",
+            f"  Longitude: {baseline.longitude_deg:.6f}",
+            f"  Radius   : {baseline.position_tolerance_m:.0f} m",
             rule,
-            f"{'Receiver':<{_NAME_COL}}{'Status':<12}{'Distance':<12}",
+            header,
             rule,
         ]
         for view in views:
             lines.append(
-                f"{_fit(view.name, _NAME_COL - 1):<{_NAME_COL}}"
-                f"{self._status_cell(view.result):<12}"
-                f"{self._distance_cell(view.result.distance_m):<12}"
+                f"{_fit(view.name, 12):<13}"
+                f"{_fit(view.constellation, 10):<11}"
+                f"{self._status_cell(view.result):<11}"
+                f"{_coord_cell(view.latitude_deg):<14}"
+                f"{_coord_cell(view.longitude_deg):<14}"
             )
         lines.append(rule)
         return "\n".join(lines)

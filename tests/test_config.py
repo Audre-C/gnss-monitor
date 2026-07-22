@@ -138,3 +138,19 @@ class TestInvalidConfig:
         text = VALID_CONFIG.split("channels:")[0] + "channels: []\n"
         with pytest.raises(ConfigError):
             load_config(write_config(tmp_path, text))
+
+class TestConstellation:
+    def test_constellation_field_loads(self, tmp_path: Path) -> None:
+        text = VALID_CONFIG.replace(
+            'module: "u-blox NEO-6M"',
+            'module: "u-blox NEO-6M"\n    constellation: "GPS"',
+        )
+        config = load_config(write_config(tmp_path, text))
+        assert config.channels[0].constellation == "GPS"
+        assert config.channels[0].display_constellation == "GPS"
+
+    def test_constellation_defaults_to_dash(self, tmp_path: Path) -> None:
+        config = load_config(write_config(tmp_path, VALID_CONFIG))
+        # No constellation set -> display helper yields '-'.
+        assert config.channels[0].constellation is None
+        assert config.channels[0].display_constellation == "-"

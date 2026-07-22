@@ -27,29 +27,42 @@ site:
 channels:
   - id: neo6m_1
     module: "u-blox NEO-6M"
-    name: "u-blox NEO-6M"
+    name: "NEO-6M"
+    constellation: "GPS"
     antenna: "BT-104"
     source:
       type: serial
       port: /dev/ttyUSB0
       baud: 9600
 
-  - id: lc29h_1
-    module: "Quectel LC29HEA"
-    name: "Quectel LC29HEA"
-    antenna: "BT-104L5"
+  - id: neom10_1
+    module: "Quescan NeoM101612F"
+    name: "NeoM10"
+    constellation: "GLONASS"
+    antenna: "BT-460D"
     source:
       type: serial
       port: /dev/ttyUSB1
+      baud: 38400
+
+  - id: lc29h_1
+    module: "Quectel LC29HEA"
+    name: "LC29HEA"
+    constellation: "Galileo"
+    antenna: "BT-104L5"
+    source:
+      type: serial
+      port: /dev/ttyUSB2
       baud: 460800
     expected:
       position_tolerance_m: 50.0
 
-  - id: neom10_1
-    module: "Quescan NeoM101612F"
-    name: "NeoM101612F"
+  - id: vollgo_1
+    module: "VOLLGO VG7779T156N0MA"
+    name: "VOLLGO"
+    constellation: "BeiDou"
     antenna: "BT-460D"
     source:
       type: serial
-      port: /dev/ttyUSB2 #tentative
-      baud: 38400
+      port: /dev/ttyUSB3
+      baud: 9600

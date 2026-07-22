@@ -60,6 +60,7 @@ class LiveController:
 
         self._workers: list[ReceiverWorker] = []
         self._evaluators: dict[str, PositionEvaluator] = {}
+        self._constellations: dict[str, str] = {}
 
         for channel in config.channels:
             source = self._source_factory(channel)
@@ -78,6 +79,7 @@ class LiveController:
             self._evaluators[channel.id] = PositionEvaluator(
                 config.effective_baseline(channel.id)
             )
+            self._constellations[channel.id] = channel.display_constellation
 
     def _default_source_factory(
         self, channel: ChannelConfig
@@ -130,13 +132,13 @@ class LiveController:
             rows.append(
                 LiveRow(
                     name=snap.name,
-                    port=snap.port,
+                    constellation=self._constellations.get(
+                        snap.receiver_id, "-"
+                    ),
                     connection=snap.connection,
                     result=result,
-                    fix_quality=snap.state.fix_quality,
-                    num_satellites=snap.state.num_satellites,
-                    last_nmea_utc=snap.state.last_fix_utc,
-                    last_update_wall=snap.last_update_wall,
+                    latitude_deg=snap.state.latitude_deg,
+                    longitude_deg=snap.state.longitude_deg,
                 )
             )
         return rows

@@ -3,7 +3,7 @@
 Runs the full concurrent pipeline (worker threads -> framer -> parser ->
 evaluator) against the real test_data corpus by pointing file sources
 through the live controller. This exercises the threading, snapshotting,
-and evaluation without requiring serial hardware.
+constellation labelling, and evaluation without requiring serial hardware.
 """
 
 from __future__ import annotations
@@ -37,25 +37,28 @@ def build_config(radius_m: float = 100.0) -> RootConfig:
         ChannelConfig(
             id="neo6m_1",
             module="u-blox NEO-6M",
-            name="u-blox NEO-6M",
+            name="NEO-6M",
+            constellation="GPS",
             source=FileSourceConfig(
                 type="file", path=dataset_path("neo6m", "normal")
             ),
         ),
         ChannelConfig(
-            id="lc29h_1",
-            module="Quectel LC29HEA",
-            name="Quectel LC29HEA",
+            id="neom10_1",
+            module="Quescan NeoM101612F",
+            name="NeoM10",
+            constellation="GLONASS",
             source=FileSourceConfig(
-                type="file", path=dataset_path("lc29hea", "normal")
+                type="file", path=dataset_path("neom10", "normal")
             ),
         ),
         ChannelConfig(
-            id="neom10_1",
-            module="Quescan NeoM101612F",
-            name="NeoM101612F",
+            id="lc29h_1",
+            module="Quectel LC29HEA",
+            name="LC29HEA",
+            constellation="Galileo",
             source=FileSourceConfig(
-                type="file", path=dataset_path("neom10", "normal")
+                type="file", path=dataset_path("lc29hea", "normal")
             ),
         ),
     ]
@@ -79,12 +82,12 @@ def test_all_receivers_healthy_over_threaded_path() -> None:
     finally:
         controller.stop()
 
-    assert set(results.keys()) == {"neo6m_1", "lc29h_1", "neom10_1"}
+    assert set(results.keys()) == {"neo6m_1", "neom10_1", "lc29h_1"}
     for rid, result in results.items():
         assert result.status is HealthStatus.OK, (rid, result.reason)
 
 
-def test_rows_expose_live_fields() -> None:
+def test_rows_expose_constellation_and_position() -> None:
     controller = LiveController(
         build_config(),
         dashboard=NullLiveDashboard(),
@@ -97,16 +100,17 @@ def test_rows_expose_live_fields() -> None:
     finally:
         controller.stop()
 
-    by_name = {r.name for r in rows}
-    assert "u-blox NEO-6M" in by_name
+    by_name = {r.name: r for r in rows}
+    assert by_name["NEO-6M"].constellation == "GPS"
+    assert by_name["NeoM10"].constellation == "GLONASS"
+    assert by_name["LC29HEA"].constellation == "Galileo"
     for row in rows:
-        assert row.port == "file"
-        # Every fixture reaches a fix, so these are populated.
-        assert row.num_satellites is not None
-        assert row.last_nmea_utc is not None
+        # Every fixture reaches a fix, so a position is populated.
+        assert row.latitude_deg is not None
+        assert row.longitude_deg is not None
 
 
-def test_dashboard_frame_renders() -> None:
+def test_dashboard_frame_renders_new_layout() -> None:
     from gnss_monitor.live.dashboard import TerminalLiveDashboard
 
     controller = LiveController(
@@ -124,5 +128,10 @@ def test_dashboard_frame_renders() -> None:
         build_config().site.expected, rows
     )
     assert "GNSS HEALTH MONITOR (LIVE)" in frame
-    assert "Port" in frame
-    assert "u-blox NEO-6M" in frame
+    assert "GNSS" in frame
+    assert "Latitude" in frame
+    assert "Longitude" in frame
+    assert "GPS" in frame
+    assert "GLONASS" in frame
+    assert "Galileo" in frame
+    assert "NEO-6M" in frame

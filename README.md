@@ -1,5 +1,8 @@
 # gnss-monitor
 
+# Pre-Running
+pip install -e .   
+
 # Continuously refreshing dashboard (Ctrl-C to stop):
 gnss-monitor --config config/replay.yaml
 

@@ -1,42 +1,30 @@
 """Terminal dashboard for live multi-receiver monitoring.
 
-Richer than the replay dashboard: adds Port, Fix quality, satellite count,
-last NMEA time, and last update time, and shows connection status
-(connecting / connected / disconnected) alongside the health verdict.
+Displays one row per receiver with its GNSS constellation, health status,
+and current latitude/longitude. The layout is fully data-driven: it renders
+whatever list of LiveRow values the controller supplies, so adding or
+removing receivers is purely a configuration change and never touches this
+module.
 
-Rendering is decoupled from the workers and evaluator: the controller
-passes in the expected baseline and a list of LiveRow values.
+Rendering is decoupled from the workers and evaluator; the controller
+passes in the expected baseline and the rows.
 """
 
 from __future__ import annotations
 
 import os
-import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional, Sequence
 
 from gnss_monitor.config.schema import ExpectedBaseline
 from gnss_monitor.live.worker import ConnectionStatus
-from gnss_monitor.model import FixQuality
 from gnss_monitor.monitor.evaluator import EvaluationResult, HealthStatus
 
-_WIDTH = 84
+_WIDTH = 70
 _OK_MARK = "\u2713"
 _FAIL_MARK = "\u2717"
 _WAIT_MARK = "\u2026"
-
-_FIX_LABELS = {
-    FixQuality.INVALID: "none",
-    FixQuality.GPS: "GPS",
-    FixQuality.DGPS: "DGPS",
-    FixQuality.PPS: "PPS",
-    FixQuality.RTK_FIXED: "RTK",
-    FixQuality.RTK_FLOAT: "RTKf",
-    FixQuality.ESTIMATED: "est",
-    FixQuality.MANUAL: "man",
-    FixQuality.SIMULATION: "sim",
-}
 
 
 @dataclass(frozen=True)
@@ -44,13 +32,11 @@ class LiveRow:
     """One receiver's data for one dashboard frame."""
 
     name: str
-    port: str
+    constellation: str
     connection: ConnectionStatus
     result: EvaluationResult
-    fix_quality: Optional[FixQuality]
-    num_satellites: Optional[int]
-    last_nmea_utc: Optional[str]
-    last_update_wall: Optional[float]
+    latitude_deg: Optional[float]
+    longitude_deg: Optional[float]
 
 
 def _fit(text: str, width: int) -> str:
@@ -61,30 +47,8 @@ def _fit(text: str, width: int) -> str:
     return text[: width - 1] + "\u2026"
 
 
-def _fix_cell(fix: Optional[FixQuality]) -> str:
-    if fix is None:
-        return "-"
-    return _FIX_LABELS.get(fix, "?")
-
-
-def _sats_cell(n: Optional[int]) -> str:
-    return "-" if n is None else str(n)
-
-
-def _nmea_time_cell(utc: Optional[str]) -> str:
-    if not utc or len(utc) < 6:
-        return "-"
-    return f"{utc[0:2]}:{utc[2:4]}:{utc[4:6]}"
-
-
-def _updated_cell(wall: Optional[float]) -> str:
-    if wall is None:
-        return "-"
-    return time.strftime("%H:%M:%S", time.localtime(wall))
-
-
-def _distance_cell(distance_m: Optional[float]) -> str:
-    return "-" if distance_m is None else f"{distance_m:.1f} m"
+def _coord_cell(value: Optional[float]) -> str:
+    return "-" if value is None else f"{value:.6f}"
 
 
 def _status_cell(row: LiveRow) -> str:
@@ -147,8 +111,8 @@ class TerminalLiveDashboard(LiveDashboard):
         bar = "=" * _WIDTH
         rule = "-" * _WIDTH
         header = (
-            f"{'Receiver':<18}{'Port':<8}{'Status':<11}{'Distance':<10}"
-            f"{'Fix':<6}{'Sats':<5}{'NMEA':<10}{'Updated':<9}"
+            f"{'Receiver':<13}{'GNSS':<11}{'Status':<11}"
+            f"{'Latitude':<14}{'Longitude':<14}"
         )
         lines = [
             bar,
@@ -164,14 +128,11 @@ class TerminalLiveDashboard(LiveDashboard):
         ]
         for row in rows:
             lines.append(
-                f"{_fit(row.name, 17):<18}"
-                f"{_fit(row.port, 7):<8}"
+                f"{_fit(row.name, 12):<13}"
+                f"{_fit(row.constellation, 10):<11}"
                 f"{_status_cell(row):<11}"
-                f"{_distance_cell(row.result.distance_m):<10}"
-                f"{_fix_cell(row.fix_quality):<6}"
-                f"{_sats_cell(row.num_satellites):<5}"
-                f"{_nmea_time_cell(row.last_nmea_utc):<10}"
-                f"{_updated_cell(row.last_update_wall):<9}"
+                f"{_coord_cell(row.latitude_deg):<14}"
+                f"{_coord_cell(row.longitude_deg):<14}"
             )
         lines.append(rule)
         return "\n".join(lines)

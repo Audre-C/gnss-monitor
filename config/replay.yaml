@@ -1,9 +1,9 @@
 # GNSS Monitor - Simple Mode (offline replay) configuration.
 #
-# Expected position is the surveyed location of the fixed installation.
-# For this replay demo it is set to the centroid of the three recorded
-# receivers (~5 m agreement). Replace with the real surveyed rooftop
-# position before live use.
+# Replays the three recorded captures. There is no BeiDou (VOLLGO) capture
+# yet, so replay runs three receivers; the live config runs all four. The
+# constellation labels reflect the assumed single-constellation setup.
+# Replace site.expected with the surveyed rooftop position before real use.
 
 app:
   name: gnss-monitor
@@ -15,7 +15,7 @@ site:
   expected:
     latitude_deg: 25.334373
     longitude_deg: 51.469359
-    position_tolerance_m: 100.0     # allowed radius (metres)
+    position_tolerance_m: 100.0
     altitude_m: 40.0
     altitude_tolerance_m: 30.0
     max_speed_mps: 1.0
@@ -26,26 +26,29 @@ site:
 channels:
   - id: neo6m_1
     module: "u-blox NEO-6M"
-    name: "GPS (NEO-6M)"
+    name: "NEO-6M"
+    constellation: "GPS"
     antenna: "BT-104"
     source:
       type: file
-      path: data\nmea_logs\GHA20P-SSI-0721_091454_COM24.log
-
-  - id: lc29h_1
-    module: "Quectel LC29HEA"
-    name: "Multi-GNSS (LC29H)"
-    antenna: "BT-104L5"
-    source:
-      type: file
-      path: data\nmea_logs\GHA20P-SSI-0721_091408_COM21.log
-    expected:
-      position_tolerance_m: 50.0    # tighter tolerance for RTK-capable unit
+      path: data/nmea_logs/GHA20P-SSI-0720_142510_COM24.log
 
   - id: neom10_1
     module: "Quescan NeoM101612F"
-    name: "Multi-GNSS (M10)"
+    name: "NeoM10"
+    constellation: "GLONASS"
     antenna: "BT-460D"
     source:
       type: file
-      path: data\nmea_logs\GHA20P-SSI-0721_091429_COM23.log
+      path: data/nmea_logs/GHA20P-SSI-0720_143953_COM23.log
+
+  - id: lc29h_1
+    module: "Quectel LC29HEA"
+    name: "LC29HEA"
+    constellation: "Galileo"
+    antenna: "BT-104L5"
+    source:
+      type: file
+      path: data/nmea_logs/GHA20P-SSI-0720_143330_COM21.log
+    expected:
+      position_tolerance_m: 50.0
