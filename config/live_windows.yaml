@@ -65,4 +65,4 @@ channels:
     source:
       type: serial
       port: COM19
-      baud: 9600
+      baud: 115200

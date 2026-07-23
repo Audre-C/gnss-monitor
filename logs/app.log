@@ -36,3 +36,22 @@
 2026-07-21 14:22:55 | INFO     | gnss_monitor.live | receiver 'neo6m_1' connected
 2026-07-21 14:22:55 | INFO     | gnss_monitor.live | receiver 'lc29h_1' connected
 2026-07-21 14:24:12 | INFO     | gnss_monitor.live | Interrupted by user; shutting down.
+2026-07-22 10:58:44 | INFO     | gnss_monitor | Configuration loaded: site 'Teleport Rooftop', 3 channel(s), mode 'replay'
+2026-07-22 11:01:53 | INFO     | gnss_monitor | Configuration loaded: site 'Teleport Rooftop', 4 channel(s), mode 'live'
+2026-07-22 11:01:53 | INFO     | gnss_monitor.live | receiver 'neo6m_1' connected
+2026-07-22 11:01:53 | INFO     | gnss_monitor.live | receiver 'vollgo_1' connected
+2026-07-22 11:01:53 | INFO     | gnss_monitor.live | receiver 'lc29h_1' connected
+2026-07-22 11:01:53 | INFO     | gnss_monitor.live | receiver 'neom10_1' connected
+2026-07-22 11:02:01 | INFO     | gnss_monitor.live | Interrupted by user; shutting down.
+2026-07-22 11:02:41 | INFO     | gnss_monitor | Configuration loaded: site 'Teleport Rooftop', 4 channel(s), mode 'live'
+2026-07-22 11:02:41 | INFO     | gnss_monitor.live | receiver 'neo6m_1' connected
+2026-07-22 11:02:41 | INFO     | gnss_monitor.live | receiver 'lc29h_1' connected
+2026-07-22 11:02:41 | INFO     | gnss_monitor.live | receiver 'neom10_1' connected
+2026-07-22 11:02:41 | INFO     | gnss_monitor.live | receiver 'vollgo_1' connected
+2026-07-22 11:03:03 | INFO     | gnss_monitor.live | Interrupted by user; shutting down.
+2026-07-22 11:04:20 | INFO     | gnss_monitor | Configuration loaded: site 'Teleport Rooftop', 4 channel(s), mode 'live'
+2026-07-22 11:04:20 | INFO     | gnss_monitor.live | receiver 'neo6m_1' connected
+2026-07-22 11:04:20 | INFO     | gnss_monitor.live | receiver 'vollgo_1' connected
+2026-07-22 11:04:20 | INFO     | gnss_monitor.live | receiver 'lc29h_1' connected
+2026-07-22 11:04:20 | INFO     | gnss_monitor.live | receiver 'neom10_1' connected
+2026-07-22 11:05:00 | INFO     | gnss_monitor.live | Interrupted by user; shutting down.

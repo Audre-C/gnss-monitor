@@ -14,3 +14,9 @@ gnss-monitor --config config/replay.yaml --check
 
 # Watch distances converge in real time (fast tick, small batches):
 gnss-monitor --config config/replay.yaml --tick 0.1 --batch 20
+
+# Live monitoring (Windows)
+gnss-monitor --config config/live_windows.yaml
+
+# Live monitoring (Pi)
+gnss-monitor --config config/live_rpi.yaml
