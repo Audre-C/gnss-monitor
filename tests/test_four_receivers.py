@@ -115,4 +115,4 @@ def test_live_windows_config_has_four_receivers() -> None:
     vollgo = next(c for c in config.channels if c.id == "vollgo_1")
     assert vollgo.source.type == "serial"
     assert vollgo.source.port == "COM19"
-    assert vollgo.source.baud == 9600
+    assert vollgo.source.baud == 115200

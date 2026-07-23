@@ -68,6 +68,39 @@ def test_outside_radius_fails() -> None:
     assert result.distance_m > 100.0
 
 
+def test_stale_data_reports_no_data() -> None:
+    # sentences_seen > 0 (data arrived at some point) but last_seen_monotonic
+    # is far enough in the past to exceed receiver_timeout_s: the receiver
+    # went silent and must be reported as NO_DATA, not as still-healthy on
+    # its last-known fix.
+    baseline = make_baseline()
+    ev = PositionEvaluator(baseline)
+    state = ReceiverState(
+        sentences_seen=100,
+        has_fix=True,
+        latitude_deg=25.334373,
+        longitude_deg=51.469359,
+        last_seen_monotonic=1000.0,
+    )
+    result = ev.evaluate(state, now=1000.0 + baseline.receiver_timeout_s + 1)
+    assert result.status is HealthStatus.NO_DATA
+    assert result.distance_m is None
+
+
+def test_fresh_data_within_timeout_still_evaluated_normally() -> None:
+    baseline = make_baseline()
+    ev = PositionEvaluator(baseline)
+    state = ReceiverState(
+        sentences_seen=100,
+        has_fix=True,
+        latitude_deg=25.334373,
+        longitude_deg=51.469359,
+        last_seen_monotonic=1000.0,
+    )
+    result = ev.evaluate(state, now=1000.0 + baseline.receiver_timeout_s - 1)
+    assert result.status is HealthStatus.OK
+
+
 def test_radius_boundary_is_inclusive() -> None:
     # A point ~5 m away with a 5.0 m radius: comparison is <=, so a point
     # exactly at the tolerance passes. Use a generous radius to assert the

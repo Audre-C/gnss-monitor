@@ -17,6 +17,7 @@ import argparse
 import sys
 
 from gnss_monitor import __version__
+from gnss_monitor.app import Application
 from gnss_monitor.config import ConfigError, RootConfig, load_config
 from gnss_monitor.logging_setup import setup_logging
 from gnss_monitor.live import LiveController, TerminalLiveDashboard
@@ -150,8 +151,8 @@ def _run_replay(config: RootConfig, args: argparse.Namespace) -> int:
         lines_per_tick=args.batch,
         once=args.once,
     )
-    controller.run()
-    return EXIT_OK
+    ok = Application(controller).run()
+    return EXIT_OK if ok else EXIT_RUNTIME_ERROR
 
 
 def _run_live(config: RootConfig, args: argparse.Namespace) -> int:
@@ -162,8 +163,8 @@ def _run_live(config: RootConfig, args: argparse.Namespace) -> int:
         read_timeout_s=args.read_timeout,
         refresh_interval_s=args.tick,
     )
-    controller.run()
-    return EXIT_OK
+    ok = Application(controller).run()
+    return EXIT_OK if ok else EXIT_RUNTIME_ERROR
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -24,8 +24,16 @@ from gnss_monitor.live.dashboard import (
     LiveRow,
     TerminalLiveDashboard,
 )
-from gnss_monitor.live.worker import ReceiverSnapshot, ReceiverWorker
-from gnss_monitor.monitor.evaluator import EvaluationResult, PositionEvaluator
+from gnss_monitor.live.worker import (
+    ConnectionStatus,
+    ReceiverSnapshot,
+    ReceiverWorker,
+)
+from gnss_monitor.monitor.evaluator import (
+    EvaluationResult,
+    HealthStatus,
+    PositionEvaluator,
+)
 from gnss_monitor.monitor.receiver_monitor import ReceiverMonitor
 from gnss_monitor.sources.base import NMEASource
 from gnss_monitor.sources.file_source import FileReplaySource
@@ -61,6 +69,7 @@ class LiveController:
         self._workers: list[ReceiverWorker] = []
         self._evaluators: dict[str, PositionEvaluator] = {}
         self._constellations: dict[str, str] = {}
+        self._last_health: dict[str, HealthStatus] = {}
 
         for channel in config.channels:
             source = self._source_factory(channel)
@@ -122,13 +131,45 @@ class LiveController:
         for worker in self._workers:
             worker.stop()
 
+    def request_stop(self) -> None:
+        """Ask the run loop to exit; safe to call from a signal handler.
+
+        Only sets the stop flag - it does none of stop()'s teardown work
+        (thread joins, port closes), so it never blocks the caller. The
+        run loop's own finally: self.stop() performs the actual teardown
+        exactly once, on the main thread, outside signal-handler context.
+        """
+        self._stop.set()
+
     def snapshots(self) -> list[ReceiverSnapshot]:
         return [worker.snapshot() for worker in self._workers]
+
+    def _evaluate(self, snap: ReceiverSnapshot) -> EvaluationResult:
+        result = self._evaluators[snap.receiver_id].evaluate(snap.state)
+        previous = self._last_health.get(snap.receiver_id)
+        if previous is not None and previous is not result.status:
+            _logger.info(
+                "receiver '%s' (%s) status changed: %s -> %s (%s)",
+                snap.receiver_id,
+                snap.name,
+                previous.value,
+                result.status.value,
+                result.reason,
+            )
+        self._last_health[snap.receiver_id] = result.status
+        return result
 
     def rows(self) -> list[LiveRow]:
         rows: list[LiveRow] = []
         for snap in self.snapshots():
-            result = self._evaluators[snap.receiver_id].evaluate(snap.state)
+            result = self._evaluate(snap)
+            # A disconnected or stale (NO_DATA) receiver must never show
+            # its last-known position: that position is no longer known
+            # to be current, so it is withheld rather than displayed.
+            fresh = (
+                snap.connection is not ConnectionStatus.DISCONNECTED
+                and result.status is not HealthStatus.NO_DATA
+            )
             rows.append(
                 LiveRow(
                     name=snap.name,
@@ -137,17 +178,17 @@ class LiveController:
                     ),
                     connection=snap.connection,
                     result=result,
-                    latitude_deg=snap.state.latitude_deg,
-                    longitude_deg=snap.state.longitude_deg,
+                    latitude_deg=snap.state.latitude_deg if fresh else None,
+                    longitude_deg=(
+                        snap.state.longitude_deg if fresh else None
+                    ),
                 )
             )
         return rows
 
     def results(self) -> dict[str, EvaluationResult]:
         return {
-            snap.receiver_id: self._evaluators[
-                snap.receiver_id
-            ].evaluate(snap.state)
+            snap.receiver_id: self._evaluate(snap)
             for snap in self.snapshots()
         }
 

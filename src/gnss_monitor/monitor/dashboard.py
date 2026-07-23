@@ -14,6 +14,7 @@ Two implementations are provided:
 from __future__ import annotations
 
 import os
+import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional, Sequence
@@ -90,7 +91,7 @@ class TerminalDashboard(Dashboard):
         views: Sequence[MonitorView],
     ) -> None:
         frame = self.render_frame(baseline, views)
-        if self._clear:
+        if self._clear and sys.stdout.isatty():
             self._clear_screen()
         print(frame, flush=True)
 

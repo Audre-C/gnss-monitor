@@ -8,6 +8,7 @@ display; those are separate, independent modules.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -31,6 +32,13 @@ class ReceiverState:
     num_satellites: Optional[int] = None
     hdop: Optional[float] = None
     last_fix_utc: Optional[str] = None
+    last_seen_monotonic: Optional[float] = None
+    """Monotonic time a sentence was last actually framed from the wire.
+
+    None until the first sentence arrives. This is what lets the
+    evaluator tell "receiver went silent" apart from "receiver is
+    still reporting its last known fix" - see PositionEvaluator.evaluate.
+    """
 
 
 class ReceiverMonitor:
@@ -71,10 +79,16 @@ class ReceiverMonitor:
         return processed
 
     def _process_line(self, line: str) -> None:
-        sentence = self._framer.frame(line, channel_id=self.receiver_id)
+        sentence = self._framer.frame(
+            line,
+            channel_id=self.receiver_id,
+            t_rx_wall=time.time(),
+            t_rx_mono=time.monotonic(),
+        )
         if sentence is None:
             return
         self.state.sentences_seen += 1
+        self.state.last_seen_monotonic = sentence.t_rx_mono
         if sentence.checksum_ok:
             self.state.valid_checksums += 1
         self._apply(self._parser.parse(sentence))

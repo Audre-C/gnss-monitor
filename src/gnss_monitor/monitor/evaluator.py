@@ -13,6 +13,7 @@ parsing, or display.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
@@ -49,13 +50,29 @@ class PositionEvaluator:
     def baseline(self) -> ExpectedBaseline:
         return self._baseline
 
-    def evaluate(self, state: ReceiverState) -> EvaluationResult:
+    def evaluate(
+        self, state: ReceiverState, now: Optional[float] = None
+    ) -> EvaluationResult:
         if state.sentences_seen == 0:
             return EvaluationResult(
                 status=HealthStatus.NO_DATA,
                 distance_m=None,
                 reason="no data received",
             )
+
+        if state.last_seen_monotonic is not None:
+            if now is None:
+                now = time.monotonic()
+            age_s = now - state.last_seen_monotonic
+            if age_s > self._baseline.receiver_timeout_s:
+                return EvaluationResult(
+                    status=HealthStatus.NO_DATA,
+                    distance_m=None,
+                    reason=(
+                        f"no data received in {age_s:.1f}s "
+                        f"(timeout {self._baseline.receiver_timeout_s:.0f}s)"
+                    ),
+                )
 
         if (
             not state.has_fix

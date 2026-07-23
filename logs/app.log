@@ -55,3 +55,4 @@
 2026-07-22 11:04:20 | INFO     | gnss_monitor.live | receiver 'lc29h_1' connected
 2026-07-22 11:04:20 | INFO     | gnss_monitor.live | receiver 'neom10_1' connected
 2026-07-22 11:05:00 | INFO     | gnss_monitor.live | Interrupted by user; shutting down.
+2026-07-23 16:00:34 | INFO     | gnss_monitor | Configuration loaded: site 'Teleport Rooftop', 4 channel(s), mode 'live'

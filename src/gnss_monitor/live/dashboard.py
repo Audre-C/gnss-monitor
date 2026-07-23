@@ -13,8 +13,10 @@ passes in the expected baseline and the rows.
 from __future__ import annotations
 
 import os
+import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Optional, Sequence
 
 from gnss_monitor.config.schema import ExpectedBaseline
@@ -88,7 +90,15 @@ class NullLiveDashboard(LiveDashboard):
 
 
 class TerminalLiveDashboard(LiveDashboard):
-    """Clears the terminal and prints a fresh live frame each update."""
+    """Clears the terminal and prints a fresh live frame each update.
+
+    Screen-clearing only happens when stdout is an actual terminal. Under
+    systemd, stdout is a pipe into journald, not a tty: clearing there
+    would just dump raw escape codes into `journalctl`, so it is skipped
+    automatically and frames print as a readable scrolling log instead -
+    this is what lets `journalctl -u gnss-monitor -f` show current
+    receiver health at a glance over SSH.
+    """
 
     def __init__(self, clear: bool = True) -> None:
         self._clear = clear
@@ -99,7 +109,7 @@ class TerminalLiveDashboard(LiveDashboard):
         rows: Sequence[LiveRow],
     ) -> None:
         frame = self.render_frame(baseline, rows)
-        if self._clear:
+        if self._clear and sys.stdout.isatty():
             os.system("cls" if os.name == "nt" else "clear")
         print(frame, flush=True)
 
@@ -117,6 +127,7 @@ class TerminalLiveDashboard(LiveDashboard):
         lines = [
             bar,
             "GNSS HEALTH MONITOR (LIVE)",
+            f"Updated: {datetime.now():%Y-%m-%d %H:%M:%S}",
             bar,
             "Expected Position",
             f"  Latitude : {baseline.latitude_deg:.6f}",

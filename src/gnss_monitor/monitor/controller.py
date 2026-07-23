@@ -17,7 +17,7 @@ changes that one method and nothing else in this file.
 
 from __future__ import annotations
 
-import time
+import threading
 from typing import Optional
 
 from gnss_monitor.config.schema import ChannelConfig, RootConfig
@@ -49,6 +49,7 @@ class SimpleModeController:
         self._lines_per_tick = lines_per_tick
         self._once = once
 
+        self._stop = threading.Event()
         self._monitors: list[ReceiverMonitor] = []
         self._evaluators: dict[str, PositionEvaluator] = {}
 
@@ -109,6 +110,10 @@ class SimpleModeController:
             for m in self._monitors
         }
 
+    def request_stop(self) -> None:
+        """Ask the run loop to exit at the next tick; signal-handler safe."""
+        self._stop.set()
+
     def run(self) -> dict[str, EvaluationResult]:
         """Run the poll/evaluate/render loop until all sources exhaust.
 
@@ -117,7 +122,7 @@ class SimpleModeController:
         for monitor in self._monitors:
             monitor.source.open()
         try:
-            while True:
+            while not self._stop.is_set():
                 any_progress = False
                 for monitor in self._monitors:
                     if monitor.poll(self._lines_per_tick) > 0:
@@ -131,7 +136,7 @@ class SimpleModeController:
                 if not any_progress:
                     break
                 if self._tick_interval_s > 0:
-                    time.sleep(self._tick_interval_s)
+                    self._stop.wait(self._tick_interval_s)
 
             if self._once:
                 self._render()

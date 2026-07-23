@@ -2,9 +2,11 @@
 #
 # Identical to config/live_windows.yaml except for the serial device
 # names. This file is the ONLY thing that changes when moving from the
-# Windows bench to the Pi deployment. Confirm the /dev/ttyUSB* ordering
-# with `ls -l /dev/serial/by-id/` and prefer stable by-id paths in
-# production to avoid USB enumeration order surprises.
+# Windows bench to the Pi deployment. The Waveshare USB-to-8CH adapter
+# enumerates via the CH9344 driver as /dev/ttyCH9344USB* rather than
+# /dev/ttyUSB*; confirm the mapping with `ls -l /dev/ttyCH9344USB*` (or
+# `/dev/serial/by-id/`) since USB enumeration order can shift across
+# reboots or when the adapter is replugged.
 
 app:
   name: gnss-monitor
@@ -32,7 +34,7 @@ channels:
     antenna: "BT-104"
     source:
       type: serial
-      port: /dev/ttyUSB0
+      port: /dev/ttyCH9344USB1
       baud: 9600
 
   - id: neom10_1
@@ -42,7 +44,7 @@ channels:
     antenna: "BT-460D"
     source:
       type: serial
-      port: /dev/ttyUSB1
+      port: /dev/ttyCH9344USB3
       baud: 38400
 
   - id: lc29h_1
@@ -52,7 +54,7 @@ channels:
     antenna: "BT-104L5"
     source:
       type: serial
-      port: /dev/ttyUSB2
+      port: /dev/ttyCH9344USB2
       baud: 460800
     expected:
       position_tolerance_m: 50.0
@@ -64,5 +66,5 @@ channels:
     antenna: "BT-460D"
     source:
       type: serial
-      port: /dev/ttyUSB3
-      baud: 9600
+      port: /dev/ttyCH9344USB0
+      baud: 115200

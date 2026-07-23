@@ -123,7 +123,8 @@ class ReceiverWorker:
             except OSError as exc:
                 # Serial disconnect / I/O error: drop, wait, retry.
                 _logger.warning(
-                    "receiver '%s' I/O error: %s; reconnecting in %.1fs",
+                    "receiver '%s' disconnected (I/O error: %s); "
+                    "retrying in %.1fs",
                     self._monitor.receiver_id,
                     exc,
                     self._reconnect_interval_s,
@@ -144,10 +145,19 @@ class ReceiverWorker:
     def _ensure_open(self) -> None:
         if self._status is ConnectionStatus.CONNECTED:
             return
+        recovering = self._status is ConnectionStatus.DISCONNECTED
         self._set_status(ConnectionStatus.CONNECTING)
         self._monitor.source.open()  # may raise OSError
         self._set_status(ConnectionStatus.CONNECTED)
-        _logger.info("receiver '%s' connected", self._monitor.receiver_id)
+        if recovering:
+            _logger.info(
+                "receiver '%s' recovered (reconnected)",
+                self._monitor.receiver_id,
+            )
+        else:
+            _logger.info(
+                "receiver '%s' connected", self._monitor.receiver_id
+            )
 
     def _pump_once(self) -> None:
         with self._lock:

@@ -1,0 +1,60 @@
+# systemd unit for gnss-monitor running as an unattended appliance on the
+# Raspberry Pi. See README.md "Deployment (Raspberry Pi)" for the full
+# install walkthrough; this file only needs the two paths below adjusted
+# to match where the project actually lives on the Pi.
+#
+# Install:
+#   sudo cp deploy/systemd/gnss-monitor.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now gnss-monitor
+
+[Unit]
+Description=GNSS Monitor - multi-constellation receiver health monitoring
+After=network.target local-fs.target
+StartLimitIntervalSec=120
+StartLimitBurst=10
+
+[Service]
+Type=simple
+
+# --- adjust these two for your install location and OS user ---
+User=pi
+WorkingDirectory=/opt/gnss-monitor
+ExecStart=/opt/gnss-monitor/.venv/bin/gnss-monitor --config /opt/gnss-monitor/config/live_rpi.yaml --mode live
+# ----------------------------------------------------------------
+
+# The serial devices (/dev/ttyCH9344USB*) are normally owned by group
+# "dialout" on Raspberry Pi OS; the service user needs membership
+# (`sudo usermod -aG dialout pi`) for this to be sufficient on its own.
+SupplementaryGroups=dialout
+
+# Force UTF-8 output regardless of the system locale (the dashboard uses
+# unicode check marks) and disable stdout buffering so dashboard frames
+# reach `journalctl -f` immediately instead of sitting in a pipe buffer.
+Environment=PYTHONIOENCODING=utf-8
+Environment=PYTHONUNBUFFERED=1
+
+# Restart on crash, unplug-induced failure, or any other exit - this is
+# what gives "if it crashes, it automatically restarts" and "resumes
+# after boot" (combined with WantedBy=multi-user.target below).
+Restart=always
+RestartSec=5
+
+# Give the app time to close serial ports and join worker threads
+# cleanly on `systemctl stop` (SIGTERM) before systemd escalates to
+# SIGKILL.
+TimeoutStopSec=10
+KillSignal=SIGTERM
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gnss-monitor
+
+# --- sandboxing (safe defaults for a single-purpose appliance) ---
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=read-only
+# -------------------------------------------------------------------
+
+[Install]
+WantedBy=multi-user.target
