@@ -28,6 +28,35 @@ gnss-monitor --config config/live_rpi.yaml
 
 ---
 
+# Live Dashboard (TUI)
+
+Live mode (`--mode live`, or `--mode auto` with an all-serial config)
+now renders a fixed, htop/btop-style terminal dashboard that redraws in
+place instead of scrolling: Header (time/uptime/version), Overall System
+Status, one block per receiver (status, score, fix, position,
+satellites, HDOP, distance from expected, last update), Triggered
+Analysis (which rules fired and why, when the `analysis:` section is
+configured), and a rolling Event Log of the last ~12 events (connects,
+disconnects, fix acquired/lost, health/analysis state changes).
+
+This only activates when stdout is an actual terminal (an interactive
+SSH session). Anywhere else - `systemd`/`journalctl`, output redirected
+to a file, piped through `less` - it automatically falls back to plain,
+timestamped, append-only frames, which is what makes
+`journalctl -u gnss-monitor -f` (see below) readable instead of full of
+raw cursor-control escape codes.
+
+Colors are minimal and only used for the health state itself: green
+(OK), yellow (Warning), bold yellow standing in for orange (Potential
+Spoofing - most terminals don't have a true ANSI "orange"), bold red
+(Spoofing Detected). Field labels are dim gray; everything else is your
+terminal's default color.
+
+No new CLI flags were needed for this - the dashboard adapts to whatever
+terminal it's attached to automatically.
+
+---
+
 # Deployment (Raspberry Pi)
 
 This turns gnss-monitor into an unattended appliance: it starts on boot,

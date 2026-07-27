@@ -11,6 +11,7 @@ marked role: reference rather than given a dedicated constellation.
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 from gnss_monitor.config import load_config
@@ -23,7 +24,7 @@ from gnss_monitor.config.schema import (
     SiteSection,
 )
 from gnss_monitor.live import LiveController, NullLiveDashboard
-from gnss_monitor.live.dashboard import TerminalLiveDashboard
+from gnss_monitor.live.dashboard import DashboardModel, TerminalLiveDashboard
 
 CONSTELLATIONS = ["GPS", "Galileo", "GLONASS", "Multi", "BeiDou"]
 RECEIVER_IDS = ["neo6m_1", "neom10_1", "neom8n_1", "lc29h_1", "vollgo_1"]
@@ -105,9 +106,16 @@ def test_constellation_labels_render_for_five_receivers() -> None:
         )
         for name, constellation in zip(RECEIVER_NAMES, CONSTELLATIONS)
     ]
-    frame = TerminalLiveDashboard(clear=False).render_frame(
-        _baseline(), rows
+    model = DashboardModel(
+        title="GNSS Monitoring Platform",
+        generated_at=datetime.now(),
+        uptime_s=0.0,
+        app_version="0.0.0-test",
+        analysis_mode="Simple Mode (position only)",
+        rows=rows,
+        events=(),
     )
+    frame = TerminalLiveDashboard(clear=False).render_frame(model)
     for label in CONSTELLATIONS:
         assert label in frame
     assert "VOLLGO" in frame
@@ -121,13 +129,7 @@ def test_live_windows_config_has_five_receivers() -> None:
     config = load_config(path)
     assert len(config.channels) == 5
     labels = {c.display_constellation for c in config.channels}
-    assert labels == {
-        "GPS",
-        "Galileo",
-        "GLONASS",
-        "BeiDou",
-        "Multi (GPS+GLONASS+Galileo+BeiDou)",
-    }
+    assert labels == {"GPS", "Galileo", "GLONASS", "BeiDou", "Reference"}
 
     lc29h = next(c for c in config.channels if c.id == "lc29h_1")
     assert lc29h.is_reference is True

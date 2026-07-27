@@ -16,8 +16,10 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from datetime import datetime
 from typing import Callable, Optional
 
+from gnss_monitor import __version__
 from gnss_monitor.analysis import (
     AnalysisEvaluator,
     AnalysisResult,
@@ -26,10 +28,12 @@ from gnss_monitor.analysis import (
 )
 from gnss_monitor.config.schema import ChannelConfig, RootConfig
 from gnss_monitor.live.dashboard import (
+    DashboardModel,
     LiveDashboard,
     LiveRow,
     TerminalLiveDashboard,
 )
+from gnss_monitor.live.event_log import EventLog
 from gnss_monitor.live.worker import (
     ConnectionStatus,
     ReceiverSnapshot,
@@ -47,6 +51,12 @@ from gnss_monitor.sources.serial_source import SerialSource
 
 _logger = logging.getLogger("gnss_monitor.live")
 
+_STATUS_EVENT_LABELS = {
+    HealthStatus.OK: "OK",
+    HealthStatus.FAILED: "Failed",
+    HealthStatus.NO_DATA: "No Data",
+}
+
 
 class LiveController:
     """Runs concurrent live monitoring over all configured channels."""
@@ -59,6 +69,7 @@ class LiveController:
         read_timeout_s: float = 0.1,
         poll_batch: int = 200,
         refresh_interval_s: float = 0.5,
+        event_log_capacity: int = 12,
         source_factory: Optional[
             Callable[[ChannelConfig], NMEASource]
         ] = None,
@@ -71,12 +82,16 @@ class LiveController:
         self._poll_batch = poll_batch
         self._source_factory = source_factory or self._default_source_factory
         self._stop = threading.Event()
+        self._started_monotonic: Optional[float] = None
+        self._event_log = EventLog(capacity=event_log_capacity)
 
         self._workers: list[ReceiverWorker] = []
         self._evaluators: dict[str, PositionEvaluator] = {}
         self._constellations: dict[str, str] = {}
         self._last_health: dict[str, HealthStatus] = {}
         self._last_analysis_state: dict[str, HealthState] = {}
+        self._last_connection: dict[str, ConnectionStatus] = {}
+        self._last_has_fix: dict[str, bool] = {}
 
         self._analysis_evaluator: Optional[AnalysisEvaluator] = None
         if config.analysis is not None:
@@ -141,6 +156,8 @@ class LiveController:
     # -- lifecycle ----------------------------------------------------------
 
     def start(self) -> None:
+        self._started_monotonic = time.monotonic()
+        self._event_log.record("Application started")
         for worker in self._workers:
             worker.start()
 
@@ -162,6 +179,45 @@ class LiveController:
     def snapshots(self) -> list[ReceiverSnapshot]:
         return [worker.snapshot() for worker in self._workers]
 
+    def _event_label(self, receiver_id: str, name: str) -> str:
+        """Short, demo-friendly identifier for the Event Log/dashboard.
+
+        Prefers the constellation label ("GPS", "Reference") over the
+        receiver's model name ("NEO-6M"), matching how the Receiver
+        Status section itself is headed.
+        """
+        constellation = self._constellations.get(receiver_id, "-")
+        return name if constellation == "-" else constellation
+
+    def _record_connection_event(self, snap: ReceiverSnapshot) -> None:
+        previous = self._last_connection.get(snap.receiver_id)
+        current = snap.connection
+        if previous is not None and previous is not current:
+            label = self._event_label(snap.receiver_id, snap.name)
+            if current is ConnectionStatus.CONNECTED:
+                verb = (
+                    "recovered"
+                    if previous is ConnectionStatus.DISCONNECTED
+                    else "connected"
+                )
+                self._event_log.record(f"{label} {verb}")
+            elif current is ConnectionStatus.DISCONNECTED:
+                self._event_log.record(f"{label} disconnected")
+            # A transition into CONNECTING is just an internal retry
+            # step (already logged in detail by ReceiverWorker); it
+            # would only add noise to the on-screen event feed.
+        self._last_connection[snap.receiver_id] = current
+
+    def _record_fix_event(self, snap: ReceiverSnapshot) -> None:
+        previous = self._last_has_fix.get(snap.receiver_id)
+        current = snap.state.has_fix
+        if previous is not None and previous is not current:
+            label = self._event_label(snap.receiver_id, snap.name)
+            message = "fix acquired" if current else "fix lost"
+            _logger.info("receiver '%s' %s", snap.receiver_id, message)
+            self._event_log.record(f"{label} {message}")
+        self._last_has_fix[snap.receiver_id] = current
+
     def _evaluate(self, snap: ReceiverSnapshot) -> EvaluationResult:
         result = self._evaluators[snap.receiver_id].evaluate(snap.state)
         previous = self._last_health.get(snap.receiver_id)
@@ -174,6 +230,11 @@ class LiveController:
                 result.status.value,
                 result.reason,
             )
+            label = self._event_label(snap.receiver_id, snap.name)
+            status_text = _STATUS_EVENT_LABELS.get(
+                result.status, result.status.value
+            )
+            self._event_log.record(f"{label} {status_text}")
         self._last_health[snap.receiver_id] = result.status
         return result
 
@@ -195,6 +256,8 @@ class LiveController:
                 snap.connection is not ConnectionStatus.DISCONNECTED
                 and result.status is not HealthStatus.NO_DATA
             )
+            self._record_connection_event(snap)
+            self._record_fix_event(snap)
             evaluations.append((snap, result, fresh))
         return evaluations
 
@@ -226,6 +289,7 @@ class LiveController:
             for receiver_id, result in all_results.items()
             if receiver_id in fresh_ids
         }
+        names = {snap.receiver_id: snap.name for snap, _r, _f in evaluations}
         for receiver_id, result in results.items():
             previous = self._last_analysis_state.get(receiver_id)
             if previous is not None and previous is not result.state:
@@ -237,6 +301,10 @@ class LiveController:
                     result.state.value,
                     result.score,
                 )
+                label = self._event_label(
+                    receiver_id, names.get(receiver_id, receiver_id)
+                )
+                self._event_log.record(f"{label} {result.state.value}")
             self._last_analysis_state[receiver_id] = result.state
         return results
 
@@ -258,6 +326,18 @@ class LiveController:
                         snap.state.longitude_deg if fresh else None
                     ),
                     analysis=analysis_results.get(snap.receiver_id),
+                    has_fix=snap.state.has_fix if fresh else None,
+                    num_satellites=(
+                        snap.state.num_satellites if fresh else None
+                    ),
+                    hdop=snap.state.hdop if fresh else None,
+                    distance_m=result.distance_m if fresh else None,
+                    # Deliberately NOT gated by `fresh`: "last update was
+                    # 45s ago" while the receiver shows Offline is
+                    # genuinely useful diagnostic context, unlike a
+                    # position/score which would misrepresent stale data
+                    # as current if shown the same way.
+                    last_update_wall=snap.last_update_wall,
                 )
             )
         return rows
@@ -276,6 +356,28 @@ class LiveController:
         """
         return self._analysis_results(self._evaluations())
 
+    def dashboard_model(self) -> DashboardModel:
+        """Everything the dashboard needs to render one frame, right now."""
+        uptime_s = (
+            time.monotonic() - self._started_monotonic
+            if self._started_monotonic is not None
+            else 0.0
+        )
+        analysis_mode = (
+            "Version 2 Scoring Engine"
+            if self._analysis_evaluator is not None
+            else "Simple Mode (position only)"
+        )
+        return DashboardModel(
+            title="GNSS Monitoring Platform",
+            generated_at=datetime.now(),
+            uptime_s=uptime_s,
+            app_version=__version__,
+            analysis_mode=analysis_mode,
+            rows=self.rows(),
+            events=self._event_log.recent(),
+        )
+
     def wait_until_sources_exhausted(self, timeout_s: float) -> bool:
         """Block until every source reports exhausted, or timeout.
 
@@ -292,13 +394,18 @@ class LiveController:
     def run(self) -> None:
         """Start workers and run the render loop until interrupted."""
         self.start()
+        self._dashboard.open()
         try:
             while not self._stop.is_set():
-                self._dashboard.update(
-                    self._config.site.expected, self.rows()
-                )
+                self._dashboard.update(self.dashboard_model())
                 self._stop.wait(self._refresh_interval_s)
         except KeyboardInterrupt:
             _logger.info("Interrupted by user; shutting down.")
         finally:
+            # One last frame showing "stopping" before teardown, so the
+            # operator watching the TUI sees a deliberate shutdown rather
+            # than the screen just freezing on its last state.
+            self._event_log.record("Application stopping")
+            self._dashboard.update(self.dashboard_model())
             self.stop()
+            self._dashboard.close()
