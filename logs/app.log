@@ -3636,8 +3636,71 @@
 2026-07-27 08:52:15 | INFO     | gnss_monitor.live | receiver 'vollgo_1' (VOLLGO) status changed: NO_DATA -> FAILED (position 121530.1 m from expected exceeds 100 m radius)
 2026-07-27 08:52:16 | INFO     | gnss_monitor.live | receiver 'neo6m_1' (NEO-6M) status changed: NO_DATA -> OK (within expected radius)
 2026-07-27 09:55:13 | INFO     | gnss_monitor.live | receiver 'lc29h_1' (LC29HEA) status changed: NO_DATA -> OK (within expected radius)
+<<<<<<< Updated upstream
 2026-07-27 10:18:09 | INFO     | gnss_monitor | Configuration loaded: site 'Teleport Rooftop', 5 channel(s), mode 'live'
 2026-07-27 10:34:11 | INFO     | gnss_monitor | Configuration loaded: site 'Teleport Rooftop', 3 channel(s), mode 'replay'
 2026-07-27 10:34:11 | INFO     | gnss_monitor.app | gnss-monitor starting
 2026-07-27 10:34:12 | INFO     | gnss_monitor.app | gnss-monitor stopped
 2026-07-27 10:34:12 | INFO     | gnss_monitor | Configuration loaded: site 'Teleport Rooftop', 5 channel(s), mode 'live'
+=======
+2026-07-27 10:30:52 | INFO     | gnss_monitor.live | receiver 'vollgo_1' (VOLLGO) status changed: FAILED -> OK (within expected radius)
+>>>>>>> Stashed changes
+2026-07-27 11:13:23 | INFO     | gnss_monitor | Configuration loaded: site 'Teleport Rooftop', 5 channel(s), mode 'live'
+2026-07-27 11:13:23 | INFO     | gnss_monitor.app | gnss-monitor starting
+2026-07-27 11:13:23 | INFO     | gnss_monitor.live | receiver 'neo6m_1' connected
+2026-07-27 11:13:23 | INFO     | gnss_monitor.live | receiver 'neom10_1' connected
+2026-07-27 11:13:23 | INFO     | gnss_monitor.live | receiver 'vollgo_1' connected
+2026-07-27 11:13:23 | INFO     | gnss_monitor.live | receiver 'lc29h_1' connected
+2026-07-27 11:13:23 | INFO     | gnss_monitor.live | receiver 'neom8n_1' connected
+2026-07-27 11:13:24 | INFO     | gnss_monitor.live | receiver 'neo6m_1' (NEO-6M) status changed: NO_DATA -> OK (within expected radius)
+2026-07-27 11:13:24 | INFO     | gnss_monitor.live | receiver 'neom8n_1' (NEO-M8N) status changed: NO_DATA -> FAILED (no valid GNSS fix)
+2026-07-27 11:13:24 | INFO     | gnss_monitor.live | receiver 'lc29h_1' (LC29HEA) status changed: NO_DATA -> OK (within expected radius)
+2026-07-27 11:13:25 | INFO     | gnss_monitor.live | receiver 'neom10_1' (NeoM10) status changed: NO_DATA -> OK (within expected radius)
+2026-07-27 11:13:25 | INFO     | gnss_monitor.live | receiver 'vollgo_1' (VOLLGO) status changed: NO_DATA -> FAILED (no valid GNSS fix)
+2026-07-27 11:13:29 | WARNING  | gnss_monitor.live | receiver 'vollgo_1' disconnected (I/O error: device reports readiness to read but returned no data (device disconnected or multiple access on port?)); retrying in 3.0s
+2026-07-27 11:13:32 | INFO     | gnss_monitor.live | receiver 'vollgo_1' recovered (reconnected)
+2026-07-27 11:13:34 | WARNING  | gnss_monitor.live | receiver 'neom10_1' disconnected (I/O error: device reports readiness to read but returned no data (device disconnected or multiple access on port?)); retrying in 3.0s
+2026-07-27 11:13:35 | WARNING  | gnss_monitor.live | receiver 'neo6m_1' disconnected (I/O error: device reports readiness to read but returned no data (device disconnected or multiple access on port?)); retrying in 3.0s
+2026-07-27 11:13:37 | INFO     | gnss_monitor.live | receiver 'neom10_1' recovered (reconnected)
+2026-07-27 11:13:38 | INFO     | gnss_monitor.live | receiver 'neo6m_1' recovered (reconnected)
+2026-07-27 11:13:42 | WARNING  | gnss_monitor.live | receiver 'lc29h_1' disconnected (I/O error: device reports readiness to read but returned no data (device disconnected or multiple access on port?)); retrying in 3.0s
+2026-07-27 11:13:45 | INFO     | gnss_monitor.live | receiver 'lc29h_1' recovered (reconnected)
+2026-07-27 11:13:46 | WARNING  | gnss_monitor.live | receiver 'neo6m_1' disconnected (I/O error: device reports readiness to read but returned no data (device disconnected or multiple access on port?)); retrying in 3.0s
+2026-07-27 11:13:49 | INFO     | gnss_monitor.live | receiver 'neo6m_1' recovered (reconnected)
+2026-07-27 11:13:50 | WARNING  | gnss_monitor.live | receiver 'lc29h_1' disconnected (I/O error: device reports readiness to read but returned no data (device disconnected or multiple access on port?)); retrying in 3.0s
+2026-07-27 11:13:51 | WARNING  | gnss_monitor.live | receiver 'vollgo_1' disconnected (I/O error: device reports readiness to read but returned no data (device disconnected or multiple access on port?)); retrying in 3.0s
+2026-07-27 11:13:53 | INFO     | gnss_monitor.live | receiver 'lc29h_1' recovered (reconnected)
+2026-07-27 11:13:53 | WARNING  | gnss_monitor.live | receiver 'lc29h_1' disconnected (I/O error: device reports readiness to read but returned no data (device disconnected or multiple access on port?)); retrying in 3.0s
+2026-07-27 11:13:54 | INFO     | gnss_monitor.live | receiver 'vollgo_1' recovered (reconnected)
+2026-07-27 11:13:56 | INFO     | gnss_monitor.live | receiver 'lc29h_1' recovered (reconnected)
+2026-07-27 11:13:57 | WARNING  | gnss_monitor.live | receiver 'lc29h_1' disconnected (I/O error: device reports readiness to read but returned no data (device disconnected or multiple access on port?)); retrying in 3.0s
+2026-07-27 11:13:57 | INFO     | gnss_monitor.app | received SIGINT; requesting graceful shutdown
+2026-07-27 11:13:57 | INFO     | gnss_monitor.app | received SIGINT; requesting graceful shutdown
+2026-07-27 11:13:57 | INFO     | gnss_monitor.app | gnss-monitor stopped
+2026-07-27 11:14:24 | INFO     | gnss_monitor | Configuration loaded: site 'Teleport Rooftop', 5 channel(s), mode 'live'
+2026-07-27 11:14:24 | INFO     | gnss_monitor.app | gnss-monitor starting
+2026-07-27 11:14:24 | INFO     | gnss_monitor.live | receiver 'neo6m_1' connected
+2026-07-27 11:14:24 | INFO     | gnss_monitor.live | receiver 'lc29h_1' connected
+2026-07-27 11:14:24 | INFO     | gnss_monitor.live | receiver 'neom10_1' connected
+2026-07-27 11:14:24 | INFO     | gnss_monitor.live | receiver 'neom8n_1' connected
+2026-07-27 11:14:24 | INFO     | gnss_monitor.live | receiver 'vollgo_1' connected
+2026-07-27 11:14:25 | INFO     | gnss_monitor.live | receiver 'neo6m_1' (NEO-6M) status changed: NO_DATA -> FAILED (no valid GNSS fix)
+2026-07-27 11:14:25 | INFO     | gnss_monitor.live | receiver 'neom8n_1' (NEO-M8N) status changed: NO_DATA -> FAILED (no valid GNSS fix)
+2026-07-27 11:14:25 | INFO     | gnss_monitor.live | receiver 'lc29h_1' (LC29HEA) status changed: NO_DATA -> OK (within expected radius)
+2026-07-27 11:14:26 | INFO     | gnss_monitor.live | receiver 'neom10_1' (NeoM10) status changed: NO_DATA -> OK (within expected radius)
+2026-07-27 11:14:26 | INFO     | gnss_monitor.live | receiver 'vollgo_1' (VOLLGO) status changed: NO_DATA -> FAILED (no valid GNSS fix)
+2026-07-27 11:14:26 | INFO     | gnss_monitor.live | receiver 'neo6m_1' (NEO-6M) status changed: FAILED -> OK (within expected radius)
+2026-07-27 11:38:21 | INFO     | gnss_monitor | Configuration loaded: site 'Teleport Rooftop', 5 channel(s), mode 'live'
+2026-07-27 11:38:21 | INFO     | gnss_monitor.app | gnss-monitor starting
+2026-07-27 11:38:21 | INFO     | gnss_monitor.live | receiver 'neo6m_1' connected
+2026-07-27 11:38:21 | INFO     | gnss_monitor.live | receiver 'neom10_1' connected
+2026-07-27 11:38:21 | INFO     | gnss_monitor.live | receiver 'neom8n_1' connected
+2026-07-27 11:38:21 | INFO     | gnss_monitor.live | receiver 'lc29h_1' connected
+2026-07-27 11:38:21 | INFO     | gnss_monitor.live | receiver 'vollgo_1' connected
+2026-07-27 11:38:22 | INFO     | gnss_monitor.live | receiver 'neo6m_1' (NEO-6M) status changed: NO_DATA -> OK (within expected radius)
+2026-07-27 11:38:22 | INFO     | gnss_monitor.live | receiver 'neom10_1' (NeoM10) status changed: NO_DATA -> FAILED (no valid GNSS fix)
+2026-07-27 11:38:22 | INFO     | gnss_monitor.live | receiver 'neom8n_1' (NEO-M8N) status changed: NO_DATA -> FAILED (no valid GNSS fix)
+2026-07-27 11:38:22 | INFO     | gnss_monitor.live | receiver 'lc29h_1' (LC29HEA) status changed: NO_DATA -> OK (within expected radius)
+2026-07-27 11:38:23 | INFO     | gnss_monitor.live | receiver 'neom10_1' (NeoM10) status changed: FAILED -> OK (within expected radius)
+2026-07-27 11:38:23 | INFO     | gnss_monitor.live | receiver 'vollgo_1' (VOLLGO) status changed: NO_DATA -> FAILED (no valid GNSS fix)
+2026-07-27 11:42:08 | INFO     | gnss_monitor.live | receiver 'vollgo_1' (VOLLGO) status changed: FAILED -> OK (within expected radius)

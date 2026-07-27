@@ -12,6 +12,10 @@ src/gnss_monitor.egg-info/requires.txt
 src/gnss_monitor.egg-info/top_level.txt
 src/gnss_monitor/analysis/__init__.py
 src/gnss_monitor/analysis/base.py
+src/gnss_monitor/analysis/evaluator.py
+src/gnss_monitor/analysis/rules.py
+src/gnss_monitor/analysis/score.py
+src/gnss_monitor/analysis/state.py
 src/gnss_monitor/bus/message_bus.py
 src/gnss_monitor/channels/channel.py
 src/gnss_monitor/config/__init__.py
@@ -45,6 +49,10 @@ src/gnss_monitor/sources/__init__.py
 src/gnss_monitor/sources/base.py
 src/gnss_monitor/sources/file_source.py
 src/gnss_monitor/sources/serial_source.py
+tests/test_analysis_evaluator.py
+tests/test_analysis_rules.py
+tests/test_analysis_score.py
+tests/test_analysis_state.py
 tests/test_app.py
 tests/test_bus.py
 tests/test_config.py
@@ -52,7 +60,7 @@ tests/test_controller_lifecycle.py
 tests/test_distance.py
 tests/test_evaluator.py
 tests/test_file_source.py
-tests/test_four_receivers.py
+tests/test_five_receivers.py
 tests/test_framer.py
 tests/test_integration_replay.py
 tests/test_live_controller.py
