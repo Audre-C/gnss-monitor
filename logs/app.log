@@ -3641,3 +3641,16 @@
 2026-07-27 10:34:11 | INFO     | gnss_monitor.app | gnss-monitor starting
 2026-07-27 10:34:12 | INFO     | gnss_monitor.app | gnss-monitor stopped
 2026-07-27 10:34:12 | INFO     | gnss_monitor | Configuration loaded: site 'Teleport Rooftop', 5 channel(s), mode 'live'
+2026-07-27 11:58:31 | INFO     | gnss_monitor | Configuration loaded: site 'Test Site', 2 channel(s), mode 'live'
+2026-07-27 11:58:31 | INFO     | gnss_monitor.app | gnss-monitor starting
+2026-07-27 11:58:31 | INFO     | gnss_monitor.live | receiver 'neom10_1' connected
+2026-07-27 11:58:31 | INFO     | gnss_monitor.live | receiver 'neo6m_1' connected
+2026-07-27 11:58:31 | INFO     | gnss_monitor.live | receiver 'neo6m_1' (NEO-6M) status changed: NO_DATA -> OK (within expected radius)
+2026-07-27 11:58:31 | INFO     | gnss_monitor.live | receiver 'neom10_1' (NeoM10) status changed: NO_DATA -> OK (within expected radius)
+2026-07-27 11:58:47 | INFO     | gnss_monitor | Configuration loaded: site 'Test Site', 2 channel(s), mode 'live'
+2026-07-27 11:58:47 | INFO     | gnss_monitor.app | gnss-monitor starting
+2026-07-27 11:58:47 | INFO     | gnss_monitor.live | receiver 'neo6m_1' connected
+2026-07-27 11:58:47 | INFO     | gnss_monitor.live | receiver 'neom10_1' connected
+2026-07-27 11:58:47 | INFO     | gnss_monitor.live | receiver 'neo6m_1' (NEO-6M) status changed: FAILED -> OK (within expected radius)
+2026-07-27 11:58:47 | INFO     | gnss_monitor.live | receiver 'neom10_1' (NeoM10) status changed: NO_DATA -> OK (within expected radius)
+2026-07-27 11:58:47 | INFO     | gnss_monitor.live | receiver 'neo6m_1' analysis state changed: Warning -> OK (score 20)

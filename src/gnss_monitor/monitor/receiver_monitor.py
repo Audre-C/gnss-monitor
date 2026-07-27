@@ -31,6 +31,7 @@ class ReceiverState:
     altitude_m: Optional[float] = None
     num_satellites: Optional[int] = None
     hdop: Optional[float] = None
+    speed_mps: Optional[float] = None
     last_fix_utc: Optional[str] = None
     last_seen_monotonic: Optional[float] = None
     """Monotonic time a sentence was last actually framed from the wire.
@@ -119,5 +120,7 @@ class ReceiverMonitor:
                 self.state.has_fix = True
                 self.state.latitude_deg = message.latitude_deg
                 self.state.longitude_deg = message.longitude_deg
+                if message.speed_mps is not None:
+                    self.state.speed_mps = message.speed_mps
                 if message.utc_time is not None:
                     self.state.last_fix_utc = message.utc_time

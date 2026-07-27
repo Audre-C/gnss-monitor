@@ -8,6 +8,16 @@ module.
 
 Rendering is decoupled from the workers and evaluator; the controller
 passes in the expected baseline and the rows.
+
+When a receiver's `analysis` field is populated (Version 2 scoring engine
+active and the receiver's data is fresh - see LiveController), the Status
+column shows the four-state analysis result (OK / Warning / Potential
+Spoofing / Spoofing Detected) instead of the Simple Mode OK/FAIL/NO FIX,
+a Score column is added, and a "Triggered Rules" section lists why each
+non-OK receiver scored the way it did. Receivers without a populated
+`analysis` (no analysis config, or stale/disconnected data) render exactly
+as before - this is purely additive, existing Simple-Mode-only deployments
+are unaffected.
 """
 
 from __future__ import annotations
@@ -19,14 +29,17 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional, Sequence
 
+from gnss_monitor.analysis.evaluator import AnalysisResult
+from gnss_monitor.analysis.score import HealthState
 from gnss_monitor.config.schema import ExpectedBaseline
 from gnss_monitor.live.worker import ConnectionStatus
 from gnss_monitor.monitor.evaluator import EvaluationResult, HealthStatus
 
-_WIDTH = 70
+_WIDTH = 78
 _OK_MARK = "\u2713"
 _FAIL_MARK = "\u2717"
 _WAIT_MARK = "\u2026"
+_WARN_MARK = "!"
 
 
 @dataclass(frozen=True)
@@ -39,6 +52,7 @@ class LiveRow:
     result: EvaluationResult
     latitude_deg: Optional[float]
     longitude_deg: Optional[float]
+    analysis: Optional[AnalysisResult] = None
 
 
 def _fit(text: str, width: int) -> str:
@@ -53,16 +67,34 @@ def _coord_cell(value: Optional[float]) -> str:
     return "-" if value is None else f"{value:.6f}"
 
 
+def _score_cell(row: LiveRow) -> str:
+    return "-" if row.analysis is None else f"{row.analysis.score:.0f}"
+
+
+def _analysis_status_cell(state: HealthState) -> str:
+    if state is HealthState.OK:
+        return f"{_OK_MARK} OK"
+    if state is HealthState.WARNING:
+        return f"{_WARN_MARK} WARN"
+    if state is HealthState.POTENTIAL_SPOOFING:
+        return f"{_FAIL_MARK} POT-SPF"
+    return f"{_FAIL_MARK} SPOOFED"
+
+
 def _status_cell(row: LiveRow) -> str:
     if row.connection is ConnectionStatus.DISCONNECTED:
         return f"{_FAIL_MARK} OFFLINE"
     if row.connection is ConnectionStatus.CONNECTING:
         return f"{_WAIT_MARK} CONN"
+    if row.result.status is HealthStatus.NO_DATA:
+        # Staleness gates everything, including the analysis engine: a
+        # receiver that has gone quiet must never show a lingering score.
+        return f"{_WAIT_MARK} WAIT"
+    if row.analysis is not None:
+        return _analysis_status_cell(row.analysis.state)
     status = row.result.status
     if status is HealthStatus.OK:
         return f"{_OK_MARK} OK"
-    if status is HealthStatus.NO_DATA:
-        return f"{_WAIT_MARK} WAIT"
     if row.result.distance_m is None:
         return f"{_FAIL_MARK} NO FIX"
     return f"{_FAIL_MARK} FAIL"
@@ -121,7 +153,7 @@ class TerminalLiveDashboard(LiveDashboard):
         bar = "=" * _WIDTH
         rule = "-" * _WIDTH
         header = (
-            f"{'Receiver':<13}{'GNSS':<11}{'Status':<11}"
+            f"{'Receiver':<13}{'GNSS':<11}{'Status':<11}{'Score':<8}"
             f"{'Latitude':<14}{'Longitude':<14}"
         )
         lines = [
@@ -142,8 +174,39 @@ class TerminalLiveDashboard(LiveDashboard):
                 f"{_fit(row.name, 12):<13}"
                 f"{_fit(row.constellation, 10):<11}"
                 f"{_status_cell(row):<11}"
+                f"{_score_cell(row):<8}"
                 f"{_coord_cell(row.latitude_deg):<14}"
                 f"{_coord_cell(row.longitude_deg):<14}"
             )
         lines.append(rule)
+        lines.extend(self._triggered_rules_section(rule, rows))
         return "\n".join(lines)
+
+    @staticmethod
+    def _triggered_rules_section(
+        rule: str, rows: Sequence[LiveRow]
+    ) -> list[str]:
+        """Build the Triggered Rules detail block for non-OK analysis rows.
+
+        Omitted entirely when no row has a populated `analysis` with at
+        least one triggered rule - e.g. analysis isn't configured, or
+        every receiver is currently OK.
+        """
+        flagged = [
+            row
+            for row in rows
+            if row.analysis is not None and row.analysis.triggered_rules
+        ]
+        if not flagged:
+            return []
+        lines = ["Triggered Rules", rule]
+        for row in flagged:
+            assert row.analysis is not None  # narrows type for mypy/readers
+            lines.append(
+                f"{row.name} - Score: {row.analysis.score:.0f} - "
+                f"State: {row.analysis.state.value}"
+            )
+            for outcome in row.analysis.triggered_rules:
+                lines.append(f"  {_OK_MARK} {outcome.reason}")
+        lines.append(rule)
+        return lines

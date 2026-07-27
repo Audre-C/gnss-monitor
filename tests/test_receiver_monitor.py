@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from gnss_monitor.monitor import ReceiverMonitor
 from gnss_monitor.sources import FileReplaySource
 from tests.fixtures import dataset_path
@@ -45,3 +47,18 @@ def test_checksum_counting() -> None:
     m = drain("neo6m")
     # Every line in the corpus has a valid checksum.
     assert m.state.valid_checksums == m.state.sentences_seen
+
+
+def test_valid_rmc_populates_speed() -> None:
+    m = ReceiverMonitor("r1", "R1", FileReplaySource("r1", dataset_path("neo6m", "normal")))
+    m._process_line(  # noqa: SLF001 - exercising line handling directly
+        "$GNRMC,113954.00,A,2520.06189,N,05128.16076,E,0.011,,"
+        "200726,,,A,V*15"
+    )
+    assert m.state.speed_mps == pytest.approx(0.011 * 0.514444)
+
+
+def test_void_rmc_does_not_set_speed() -> None:
+    m = ReceiverMonitor("r1", "R1", FileReplaySource("r1", dataset_path("neo6m", "normal")))
+    m._process_line("$GPRMC,,V,,,,,,,,,,N*53")  # noqa: SLF001
+    assert m.state.speed_mps is None
