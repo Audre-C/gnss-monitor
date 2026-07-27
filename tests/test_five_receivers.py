@@ -1,9 +1,12 @@
-"""Tests that the system supports N receivers (here: four) via config only.
+"""Tests that the system supports N receivers via config only.
 
-These verify that adding the fourth (VOLLGO / BeiDou) receiver is a pure
-configuration change: the config loads, the constellation labels flow
-through, and both the live and replay controllers build one worker/monitor
-per channel with no receiver-specific branching.
+Originally written for four receivers, now five (u-blox NEO-M8N /
+GLONASS added) - the point being tested hasn't changed: adding a
+receiver is a pure configuration change, the config loads, the
+constellation labels flow through, and both the live and replay
+controllers build one worker/monitor per channel with no
+receiver-specific branching. The LC29HEA is multi-constellation and is
+marked role: reference rather than given a dedicated constellation.
 """
 
 from __future__ import annotations
@@ -15,7 +18,6 @@ from gnss_monitor.config.schema import (
     AppSection,
     ChannelConfig,
     ExpectedBaseline,
-    FileSourceConfig,
     RootConfig,
     SerialSourceConfig,
     SiteSection,
@@ -23,7 +25,9 @@ from gnss_monitor.config.schema import (
 from gnss_monitor.live import LiveController, NullLiveDashboard
 from gnss_monitor.live.dashboard import TerminalLiveDashboard
 
-CONSTELLATIONS = ["GPS", "GLONASS", "Galileo", "BeiDou"]
+CONSTELLATIONS = ["GPS", "Galileo", "GLONASS", "Multi", "BeiDou"]
+RECEIVER_IDS = ["neo6m_1", "neom10_1", "neom8n_1", "lc29h_1", "vollgo_1"]
+RECEIVER_NAMES = ["NEO-6M", "NeoM10", "NEO-M8N", "LC29HEA", "VOLLGO"]
 
 
 def _baseline() -> ExpectedBaseline:
@@ -40,21 +44,21 @@ def _baseline() -> ExpectedBaseline:
     )
 
 
-def build_four_serial_config() -> RootConfig:
-    ports = ["COM24", "COM23", "COM21", "COM19"]
-    names = ["NEO-6M", "NeoM10", "LC29HEA", "VOLLGO"]
-    ids = ["neo6m_1", "neom10_1", "lc29h_1", "vollgo_1"]
+def build_five_serial_config() -> RootConfig:
+    ports = ["COM24", "COM23", "COM25", "COM21", "COM19"]
+    roles = ["constellation", "constellation", "constellation", "reference", "constellation"]
     channels = [
         ChannelConfig(
-            id=ids[i],
-            module=names[i],
-            name=names[i],
+            id=RECEIVER_IDS[i],
+            module=RECEIVER_NAMES[i],
+            name=RECEIVER_NAMES[i],
             constellation=CONSTELLATIONS[i],
+            role=roles[i],
             source=SerialSourceConfig(
                 type="serial", port=ports[i], baud=9600
             ),
         )
-        for i in range(4)
+        for i in range(5)
     ]
     return RootConfig(
         app=AppSection(),
@@ -63,18 +67,26 @@ def build_four_serial_config() -> RootConfig:
     )
 
 
-def test_four_receiver_config_builds_four_workers() -> None:
+def test_five_receiver_config_builds_five_workers() -> None:
     # No hardware: constructing the controller must not open ports, so we
     # can assert it builds one worker/evaluator per channel.
     controller = LiveController(
-        build_four_serial_config(), dashboard=NullLiveDashboard()
+        build_five_serial_config(), dashboard=NullLiveDashboard()
     )
-    assert len(controller._workers) == 4  # noqa: SLF001 - test introspection
+    assert len(controller._workers) == 5  # noqa: SLF001 - test introspection
     ids = {w.receiver_id for w in controller._workers}
-    assert ids == {"neo6m_1", "neom10_1", "lc29h_1", "vollgo_1"}
+    assert ids == set(RECEIVER_IDS)
 
 
-def test_constellation_labels_render_for_four_receivers() -> None:
+def test_reference_role_flows_through_config() -> None:
+    config = build_five_serial_config()
+    lc29h = next(c for c in config.channels if c.id == "lc29h_1")
+    assert lc29h.is_reference is True
+    others = [c for c in config.channels if c.id != "lc29h_1"]
+    assert all(not c.is_reference for c in others)
+
+
+def test_constellation_labels_render_for_five_receivers() -> None:
     from gnss_monitor.live.dashboard import LiveRow
     from gnss_monitor.live.worker import ConnectionStatus
     from gnss_monitor.monitor.evaluator import (
@@ -91,9 +103,7 @@ def test_constellation_labels_render_for_four_receivers() -> None:
             latitude_deg=25.3,
             longitude_deg=51.4,
         )
-        for name, constellation in zip(
-            ["NEO-6M", "NeoM10", "LC29HEA", "VOLLGO"], CONSTELLATIONS
-        )
+        for name, constellation in zip(RECEIVER_NAMES, CONSTELLATIONS)
     ]
     frame = TerminalLiveDashboard(clear=False).render_frame(
         _baseline(), rows
@@ -101,17 +111,32 @@ def test_constellation_labels_render_for_four_receivers() -> None:
     for label in CONSTELLATIONS:
         assert label in frame
     assert "VOLLGO" in frame
-    assert "BeiDou" in frame
+    assert "NEO-M8N" in frame
 
 
-def test_live_windows_config_has_four_receivers() -> None:
+def test_live_windows_config_has_five_receivers() -> None:
     path = Path("config/live_windows.yaml")
     if not path.is_file():
         return  # config not present in this checkout; skip silently
     config = load_config(path)
-    assert len(config.channels) == 4
+    assert len(config.channels) == 5
     labels = {c.display_constellation for c in config.channels}
-    assert labels == {"GPS", "GLONASS", "Galileo", "BeiDou"}
+    assert labels == {
+        "GPS",
+        "Galileo",
+        "GLONASS",
+        "BeiDou",
+        "Multi (GPS+GLONASS+Galileo+BeiDou)",
+    }
+
+    lc29h = next(c for c in config.channels if c.id == "lc29h_1")
+    assert lc29h.is_reference is True
+
+    neom8n = next(c for c in config.channels if c.id == "neom8n_1")
+    assert neom8n.source.type == "serial"
+    assert neom8n.source.port == "COM25"
+    assert neom8n.source.baud == 9600
+
     vollgo = next(c for c in config.channels if c.id == "vollgo_1")
     assert vollgo.source.type == "serial"
     assert vollgo.source.port == "COM19"

@@ -139,6 +139,89 @@ class TestInvalidConfig:
         with pytest.raises(ConfigError):
             load_config(write_config(tmp_path, text))
 
+ANALYSIS_SECTION = """
+analysis:
+  position:
+    warning_radius_m: 100
+    failure_radius_m: 500
+    weight_warning: 20
+    weight_failure: 40
+  no_fix:
+    weight: 30
+  speed:
+    stationary_speed_limit_kmh: 5
+    warning_speed_kmh: 10
+    weight: 25
+  satellites:
+    minimum: 5
+    sudden_drop: 3
+    weight: 15
+  hdop:
+    warning: 2.5
+    critical: 5.0
+    weight: 20
+  time:
+    max_jump_seconds: 3
+    weight: 30
+  disagreement:
+    max_distance_between_receivers_m: 100
+    weight: 35
+  overall:
+    warning: 30
+    potential_spoofing: 60
+    spoofing: 90
+"""
+
+
+class TestAnalysisConfig:
+    def test_absent_by_default(self, tmp_path: Path) -> None:
+        config = load_config(write_config(tmp_path, VALID_CONFIG))
+        assert config.analysis is None
+
+    def test_loads_when_present(self, tmp_path: Path) -> None:
+        text = VALID_CONFIG + ANALYSIS_SECTION
+        config = load_config(write_config(tmp_path, text))
+        assert config.analysis is not None
+        assert config.analysis.position.warning_radius_m == 100
+        assert config.analysis.position.failure_radius_m == 500
+        assert config.analysis.overall.spoofing == 90
+
+    def test_position_radii_must_be_ordered(self, tmp_path: Path) -> None:
+        text = VALID_CONFIG + ANALYSIS_SECTION.replace(
+            "failure_radius_m: 500", "failure_radius_m: 50"
+        )
+        with pytest.raises(ConfigError, match="failure_radius_m"):
+            load_config(write_config(tmp_path, text))
+
+    def test_speed_thresholds_must_be_ordered(self, tmp_path: Path) -> None:
+        text = VALID_CONFIG + ANALYSIS_SECTION.replace(
+            "warning_speed_kmh: 10", "warning_speed_kmh: 2"
+        )
+        with pytest.raises(ConfigError, match="warning_speed_kmh"):
+            load_config(write_config(tmp_path, text))
+
+    def test_hdop_thresholds_must_be_ordered(self, tmp_path: Path) -> None:
+        text = VALID_CONFIG + ANALYSIS_SECTION.replace(
+            "critical: 5.0", "critical: 1.0"
+        )
+        with pytest.raises(ConfigError, match="critical"):
+            load_config(write_config(tmp_path, text))
+
+    def test_overall_thresholds_must_be_ordered(self, tmp_path: Path) -> None:
+        text = VALID_CONFIG + ANALYSIS_SECTION.replace(
+            "potential_spoofing: 60", "potential_spoofing: 10"
+        )
+        with pytest.raises(ConfigError, match="overall"):
+            load_config(write_config(tmp_path, text))
+
+    def test_unknown_analysis_key_rejected(self, tmp_path: Path) -> None:
+        text = VALID_CONFIG + ANALYSIS_SECTION.replace(
+            "weight: 30\n  speed:", "weight: 30\n    bogus: 1\n  speed:"
+        )
+        with pytest.raises(ConfigError):
+            load_config(write_config(tmp_path, text))
+
+
 class TestConstellation:
     def test_constellation_field_loads(self, tmp_path: Path) -> None:
         text = VALID_CONFIG.replace(

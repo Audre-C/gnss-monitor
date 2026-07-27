@@ -3636,3 +3636,8 @@
 2026-07-27 08:52:15 | INFO     | gnss_monitor.live | receiver 'vollgo_1' (VOLLGO) status changed: NO_DATA -> FAILED (position 121530.1 m from expected exceeds 100 m radius)
 2026-07-27 08:52:16 | INFO     | gnss_monitor.live | receiver 'neo6m_1' (NEO-6M) status changed: NO_DATA -> OK (within expected radius)
 2026-07-27 09:55:13 | INFO     | gnss_monitor.live | receiver 'lc29h_1' (LC29HEA) status changed: NO_DATA -> OK (within expected radius)
+2026-07-27 10:18:09 | INFO     | gnss_monitor | Configuration loaded: site 'Teleport Rooftop', 5 channel(s), mode 'live'
+2026-07-27 10:34:11 | INFO     | gnss_monitor | Configuration loaded: site 'Teleport Rooftop', 3 channel(s), mode 'replay'
+2026-07-27 10:34:11 | INFO     | gnss_monitor.app | gnss-monitor starting
+2026-07-27 10:34:12 | INFO     | gnss_monitor.app | gnss-monitor stopped
+2026-07-27 10:34:12 | INFO     | gnss_monitor | Configuration loaded: site 'Teleport Rooftop', 5 channel(s), mode 'live'

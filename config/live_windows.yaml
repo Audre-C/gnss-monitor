@@ -1,10 +1,19 @@
 # GNSS Monitor - Live mode (Windows COM ports) configuration.
 #
-# Four receivers, each configured (externally, at boot) to track a single
-# GNSS constellation. Replace site.expected with the surveyed rooftop
-# position before real use. To deploy on the Raspberry Pi, copy this file
-# and change only the source.port values; no code or other settings
-# change. See config/live_rpi.yaml.
+# Five receivers: four each configured (externally, at boot) to track a
+# single GNSS constellation, plus the LC29HEA which is multi-constellation
+# and is therefore marked role: reference rather than given a
+# constellation of its own - see ChannelConfig.role. Replace
+# site.expected with the surveyed rooftop position before real use. To
+# deploy on the Raspberry Pi, copy this file and change only the
+# source.port values; no code or other settings change. See
+# config/live_rpi.yaml.
+#
+# The `analysis:` section configures the Version 2 scoring engine
+# (gnss_monitor.analysis). It is optional - omit it entirely to run
+# Simple Mode only - and every value below is a starting point, not a
+# calibrated production threshold; tune against real capture data before
+# relying on it operationally.
 
 app:
   name: gnss-monitor
@@ -38,17 +47,27 @@ channels:
   - id: neom10_1
     module: "Quescan NeoM101612F"
     name: "NeoM10"
-    constellation: "GLONASS"
+    constellation: "Galileo"
     antenna: "BT-460D"
     source:
       type: serial
       port: COM23
       baud: 38400
 
+  - id: neom8n_1
+    module: "u-blox NEO-M8N"
+    name: "NEO-M8N"
+    constellation: "GLONASS"
+    source:
+      type: serial
+      port: COM25
+      baud: 9600
+
   - id: lc29h_1
     module: "Quectel LC29HEA"
     name: "LC29HEA"
-    constellation: "Galileo"
+    constellation: "Multi (GPS+GLONASS+Galileo+BeiDou)"
+    role: reference
     antenna: "BT-104L5"
     source:
       type: serial
@@ -66,3 +85,34 @@ channels:
       type: serial
       port: COM19
       baud: 115200
+
+analysis:
+  position:
+    warning_radius_m: 100
+    failure_radius_m: 500
+    weight_warning: 20
+    weight_failure: 40
+  no_fix:
+    weight: 30
+  speed:
+    stationary_speed_limit_kmh: 5
+    warning_speed_kmh: 10
+    weight: 25
+  satellites:
+    minimum: 5
+    sudden_drop: 3
+    weight: 15
+  hdop:
+    warning: 2.5
+    critical: 5.0
+    weight: 20
+  time:
+    max_jump_seconds: 3
+    weight: 30
+  disagreement:
+    max_distance_between_receivers_m: 100
+    weight: 35
+  overall:
+    warning: 30
+    potential_spoofing: 60
+    spoofing: 90

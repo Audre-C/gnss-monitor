@@ -149,6 +149,8 @@ Do NOT implement yet.
 
 Future versions may use:
 
+C/N
+
 HDOP
 
 PDOP
