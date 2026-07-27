@@ -18,6 +18,12 @@ import threading
 import time
 from typing import Callable, Optional
 
+from gnss_monitor.analysis import (
+    AnalysisEvaluator,
+    AnalysisResult,
+    HealthState,
+    receiver_sample_from_state,
+)
 from gnss_monitor.config.schema import ChannelConfig, RootConfig
 from gnss_monitor.live.dashboard import (
     LiveDashboard,
@@ -70,6 +76,18 @@ class LiveController:
         self._evaluators: dict[str, PositionEvaluator] = {}
         self._constellations: dict[str, str] = {}
         self._last_health: dict[str, HealthStatus] = {}
+        self._last_analysis_state: dict[str, HealthState] = {}
+
+        self._analysis_evaluator: Optional[AnalysisEvaluator] = None
+        if config.analysis is not None:
+            self._analysis_evaluator = AnalysisEvaluator(
+                config.analysis,
+                expected_latitude_deg=config.site.expected.latitude_deg,
+                expected_longitude_deg=config.site.expected.longitude_deg,
+                reference_receiver_ids=frozenset(
+                    c.id for c in config.channels if c.is_reference
+                ),
+            )
 
         for channel in config.channels:
             source = self._source_factory(channel)
@@ -159,17 +177,74 @@ class LiveController:
         self._last_health[snap.receiver_id] = result.status
         return result
 
-    def rows(self) -> list[LiveRow]:
-        rows: list[LiveRow] = []
+    def _evaluations(
+        self,
+    ) -> list[tuple[ReceiverSnapshot, EvaluationResult, bool]]:
+        """One (snapshot, Simple Mode result, is-fresh) triple per receiver.
+
+        "fresh" is the single source of truth for "may this receiver's
+        data be shown/used right now": a disconnected or stale (NO_DATA)
+        receiver's position and analysis score are both withheld, since
+        neither is known to be current - see the disconnect-handling
+        notes on PositionEvaluator.evaluate.
+        """
+        evaluations = []
         for snap in self.snapshots():
             result = self._evaluate(snap)
-            # A disconnected or stale (NO_DATA) receiver must never show
-            # its last-known position: that position is no longer known
-            # to be current, so it is withheld rather than displayed.
             fresh = (
                 snap.connection is not ConnectionStatus.DISCONNECTED
                 and result.status is not HealthStatus.NO_DATA
             )
+            evaluations.append((snap, result, fresh))
+        return evaluations
+
+    def _analysis_results(
+        self,
+        evaluations: list[tuple[ReceiverSnapshot, EvaluationResult, bool]],
+    ) -> dict[str, AnalysisResult]:
+        """Version 2 scores for every currently-fresh receiver.
+
+        Empty if no `analysis:` section is configured. Only fresh
+        receivers are fed a new sample: feeding a frozen sample from a
+        stale/disconnected receiver would let delta-based rules (sudden
+        satellite drop, time discontinuity) compare against a
+        gap-spanning "previous" reading and misfire once data resumes.
+        """
+        if self._analysis_evaluator is None:
+            return {}
+
+        for snap, _result, fresh in evaluations:
+            if fresh:
+                self._analysis_evaluator.update(
+                    snap.receiver_id, receiver_sample_from_state(snap.state)
+                )
+
+        all_results = self._analysis_evaluator.evaluate_all()
+        fresh_ids = {snap.receiver_id for snap, _r, fresh in evaluations if fresh}
+        results = {
+            receiver_id: result
+            for receiver_id, result in all_results.items()
+            if receiver_id in fresh_ids
+        }
+        for receiver_id, result in results.items():
+            previous = self._last_analysis_state.get(receiver_id)
+            if previous is not None and previous is not result.state:
+                _logger.info(
+                    "receiver '%s' analysis state changed: %s -> %s "
+                    "(score %.0f)",
+                    receiver_id,
+                    previous.value,
+                    result.state.value,
+                    result.score,
+                )
+            self._last_analysis_state[receiver_id] = result.state
+        return results
+
+    def rows(self) -> list[LiveRow]:
+        evaluations = self._evaluations()
+        analysis_results = self._analysis_results(evaluations)
+        rows: list[LiveRow] = []
+        for snap, result, fresh in evaluations:
             rows.append(
                 LiveRow(
                     name=snap.name,
@@ -182,15 +257,24 @@ class LiveController:
                     longitude_deg=(
                         snap.state.longitude_deg if fresh else None
                     ),
+                    analysis=analysis_results.get(snap.receiver_id),
                 )
             )
         return rows
 
     def results(self) -> dict[str, EvaluationResult]:
         return {
-            snap.receiver_id: self._evaluate(snap)
-            for snap in self.snapshots()
+            snap.receiver_id: result
+            for snap, result, _fresh in self._evaluations()
         }
+
+    def analysis_results(self) -> dict[str, AnalysisResult]:
+        """Latest Version 2 scoring result per receiver with fresh data.
+
+        Empty dict if no `analysis:` section is configured. Mirrors
+        results() but for the Version 2 engine.
+        """
+        return self._analysis_results(self._evaluations())
 
     def wait_until_sources_exhausted(self, timeout_s: float) -> bool:
         """Block until every source reports exhausted, or timeout.
