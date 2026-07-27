@@ -164,17 +164,16 @@ def test_dashboard_frame_renders_new_layout() -> None:
     controller.start()
     try:
         controller.wait_until_sources_exhausted(timeout_s=5.0)
-        rows = controller.rows()
+        model = controller.dashboard_model()
     finally:
         controller.stop()
 
-    frame = TerminalLiveDashboard(clear=False).render_frame(
-        build_config().site.expected, rows
-    )
-    assert "GNSS HEALTH MONITOR (LIVE)" in frame
-    assert "GNSS" in frame
-    assert "Latitude" in frame
-    assert "Longitude" in frame
+    frame = TerminalLiveDashboard(clear=False).render_frame(model)
+    assert "GNSS Monitoring Platform" in frame
+    assert "Overall System Status" in frame
+    assert "Receiver Status" in frame
+    assert "Latitude:" in frame
+    assert "Longitude:" in frame
     assert "GPS" in frame
     assert "GLONASS" in frame
     assert "Galileo" in frame
@@ -472,3 +471,117 @@ def test_reference_role_excludes_receiver_from_disagreement() -> None:
 
     assert not any(o.name == "disagreement" for o in results["gps_1"].triggered_rules)
     assert not any(o.name == "disagreement" for o in results["ref_1"].triggered_rules)
+
+
+def test_dashboard_model_reports_uptime_version_and_mode() -> None:
+    controller = LiveController(
+        build_config(analysis=analysis_config()),
+        dashboard=NullLiveDashboard(),
+        refresh_interval_s=0.05,
+    )
+    controller.start()
+    try:
+        time.sleep(0.05)
+        model = controller.dashboard_model()
+    finally:
+        controller.stop()
+
+    assert model.title == "GNSS Monitoring Platform"
+    assert model.uptime_s > 0.0
+    assert model.app_version  # non-empty
+    assert model.analysis_mode == "Version 2 Scoring Engine"
+    assert len(model.rows) == 3
+
+
+def test_dashboard_model_reports_simple_mode_when_analysis_absent() -> None:
+    controller = LiveController(
+        build_config(), dashboard=NullLiveDashboard(), refresh_interval_s=0.05
+    )
+    controller.start()
+    try:
+        model = controller.dashboard_model()
+    finally:
+        controller.stop()
+    assert model.analysis_mode == "Simple Mode (position only)"
+
+
+def test_start_records_application_started_event() -> None:
+    controller = LiveController(
+        build_config(), dashboard=NullLiveDashboard(), refresh_interval_s=0.05
+    )
+    controller.start()
+    try:
+        messages = [e.message for e in controller.dashboard_model().events]
+    finally:
+        controller.stop()
+    assert "Application started" in messages
+
+
+def _snapshot(
+    receiver_id: str,
+    name: str,
+    connection: ConnectionStatus,
+    has_fix: bool,
+) -> "ReceiverSnapshot":
+    from gnss_monitor.live.worker import ReceiverSnapshot
+    from gnss_monitor.monitor.receiver_monitor import ReceiverState
+
+    return ReceiverSnapshot(
+        receiver_id=receiver_id,
+        name=name,
+        port="COM_TEST",
+        connection=connection,
+        state=ReceiverState(has_fix=has_fix, sentences_seen=1),
+        last_update_wall=time.time(),
+        source_exhausted=False,
+    )
+
+
+def test_event_log_records_connection_and_fix_transitions() -> None:
+    # Drive the private transition-tracking methods directly with
+    # synthetic snapshots: this is the same logic the real threaded path
+    # uses, but deterministic - going through real worker threads makes
+    # the "first observation" (which only seeds a baseline, see
+    # _record_fix_event) and the "later transition" race unpredictably.
+    controller = LiveController(
+        build_config(), dashboard=NullLiveDashboard()
+    )
+    receiver_id, name = "neo6m_1", "NEO-6M"  # constellation "GPS" per build_config
+
+    # Baseline: connecting, no fix yet.
+    controller._record_connection_event(  # noqa: SLF001 - exercising internals
+        _snapshot(receiver_id, name, ConnectionStatus.CONNECTING, has_fix=False)
+    )
+    controller._record_fix_event(  # noqa: SLF001
+        _snapshot(receiver_id, name, ConnectionStatus.CONNECTING, has_fix=False)
+    )
+    # Read the event log directly rather than via dashboard_model(): that
+    # also runs rows()/_evaluations() over the controller's real (never
+    # started) workers, which would re-observe "neo6m_1" itself and
+    # contaminate the transition history this test is building by hand.
+    assert controller._event_log.recent() == []  # noqa: SLF001
+
+    # Connects and acquires a fix.
+    controller._record_connection_event(  # noqa: SLF001
+        _snapshot(receiver_id, name, ConnectionStatus.CONNECTED, has_fix=False)
+    )
+    controller._record_fix_event(  # noqa: SLF001
+        _snapshot(receiver_id, name, ConnectionStatus.CONNECTED, has_fix=True)
+    )
+    messages = [e.message for e in controller._event_log.recent()]  # noqa: SLF001
+    assert "GPS connected" in messages
+    assert "GPS fix acquired" in messages
+
+    # Disconnects.
+    controller._record_connection_event(  # noqa: SLF001
+        _snapshot(receiver_id, name, ConnectionStatus.DISCONNECTED, has_fix=True)
+    )
+    messages = [e.message for e in controller._event_log.recent()]  # noqa: SLF001
+    assert "GPS disconnected" in messages
+
+    # Reconnects: this is "recovered", not "connected" again.
+    controller._record_connection_event(  # noqa: SLF001
+        _snapshot(receiver_id, name, ConnectionStatus.CONNECTED, has_fix=True)
+    )
+    messages = [e.message for e in controller._event_log.recent()]  # noqa: SLF001
+    assert "GPS recovered" in messages

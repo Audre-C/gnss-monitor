@@ -1,0 +1,46 @@
+# --- Project-specific -------------------------------------------------
+# Task/prompt notes pasted in during development - not project source.
+context.md
+
+# Runtime logs written by gnss_monitor.logging_setup (rotating app.log
+# and friends). Does NOT match data/nmea_logs/ or test_data/, which are
+# real NMEA capture fixtures the app replays, not runtime output.
+/logs/
+
+# --- Python -------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Packaging / build artifacts (e.g. `pip install -e .`)
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Test / coverage / type-checker caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# --- Secrets --------------------------------------------------------------
+.env
+.env.*
+*.pem
+*.key
+
+# --- Editors / OS -------------------------------------------------------
+.vscode/
+.idea/
+.claude/
+.DS_Store
+Thumbs.db
