@@ -170,10 +170,10 @@ def test_dashboard_frame_renders_new_layout() -> None:
 
     frame = TerminalLiveDashboard(clear=False).render_frame(model)
     assert "GNSS Monitoring Platform" in frame
-    assert "Overall System Status" in frame
+    assert "Health:" in frame
     assert "Receiver Status" in frame
-    assert "Latitude:" in frame
-    assert "Longitude:" in frame
+    assert "Lat" in frame
+    assert "Lon" in frame
     assert "GPS" in frame
     assert "GLONASS" in frame
     assert "Galileo" in frame

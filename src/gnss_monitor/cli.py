@@ -82,6 +82,11 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         help="Live: serial read timeout in seconds (default: 0.1).",
     )
     parser.add_argument(
+        "--dashboard-debug",
+        action="store_true",
+        help="Live: show the detected terminal size in the dashboard header.",
+    )
+    parser.add_argument(
         "--version",
         action="version",
         version=f"%(prog)s {__version__}",
@@ -158,7 +163,7 @@ def _run_replay(config: RootConfig, args: argparse.Namespace) -> int:
 def _run_live(config: RootConfig, args: argparse.Namespace) -> int:
     controller = LiveController(
         config=config,
-        dashboard=TerminalLiveDashboard(),
+        dashboard=TerminalLiveDashboard(debug=args.dashboard_debug),
         reconnect_interval_s=args.reconnect_interval,
         read_timeout_s=args.read_timeout,
         refresh_interval_s=args.tick,
@@ -178,8 +183,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return EXIT_CONFIG_ERROR
 
+    # An interactive live TUI owns the terminal completely: stdout and
+    # stderr share the same physical screen over plain SSH, so console
+    # log lines (reconnect retries, state-change notices) would land
+    # outside the dashboard's own redraw and force the terminal to
+    # scroll. Everything still goes to the rotating log file regardless.
+    interactive_tui = mode == "live" and sys.stdout.isatty()
     logger = setup_logging(
-        config.app.log_dir, config.app.diagnostics_level
+        config.app.log_dir, config.app.diagnostics_level, console=not interactive_tui
     )
     logger.info(
         "Configuration loaded: site '%s', %d channel(s), mode '%s'",

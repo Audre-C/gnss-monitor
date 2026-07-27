@@ -10,9 +10,18 @@ depending on the emulator. This version instead:
       overwrites each line in place, clearing only the trailing part of
       any line that got shorter (`ESC[K`) - never a full-screen clear
       after the first frame, which is what removes the flicker;
-    * pads every frame up to the tallest frame drawn so far in this run,
-      so a frame that's briefly shorter (e.g. "Triggered Analysis" empties
-      out) can't leave stale text behind or cause the terminal to scroll;
+    * measures the real terminal size every frame (`shutil.
+      get_terminal_size`) and builds a frame that fits inside it: width
+      never exceeds the terminal's columns (the receiver table drops its
+      lowest-priority columns before it would overflow), and height never
+      exceeds the terminal's rows (Triggered Analysis and the Event Log
+      shrink, and finally disappear, before the receiver table would be
+      pushed past the bottom row). A frame taller than the terminal is
+      exactly what forces the terminal itself to scroll out from under a
+      fixed-cursor redraw - see _draw_in_place;
+    * pads every frame up to the tallest frame drawn so far in this run
+      (never past the terminal height), so a frame that's briefly shorter
+      can't leave stale text behind or cause the terminal to scroll;
     * only does any of this when stdout is an actual terminal. Piped or
       redirected output (systemd -> journald, `> file`, `| less`) falls
       back to plain, readable, append-only lines - exactly the behavior
@@ -42,11 +51,6 @@ from gnss_monitor.live.event_log import LogEvent
 from gnss_monitor.live.worker import ConnectionStatus
 from gnss_monitor.monitor.evaluator import EvaluationResult, HealthStatus
 
-_WIDTH = 78
-_BAR = "=" * _WIDTH
-_RULE = "-" * _WIDTH
-_LABEL_WIDTH = 20
-
 _RESET = "\x1b[0m"
 _COLOR_GREEN = "\x1b[32m"
 _COLOR_YELLOW = "\x1b[33m"
@@ -54,8 +58,8 @@ _COLOR_ORANGE = "\x1b[1;33m"  # bold yellow: safe "orange" on 8-color terminals
 _COLOR_RED = "\x1b[1;31m"
 _COLOR_GRAY = "\x1b[90m"
 
-_EVENT_LOG_CHROME_LINES = 4  # bar, title, bar, blank
-_MIN_EVENT_LINES = 3
+_COL_SEP = "  "
+_MAX_RECEIVER_CELL = 24
 
 _RULE_LABELS = {
     "no_fix": "No GNSS Fix",
@@ -185,11 +189,62 @@ def _colorize(text: str, code: str, enabled: bool) -> str:
     return f"{code}{text}{_RESET}" if enabled and code else text
 
 
-def _field(label: str, value: str, color: bool, width: int = _LABEL_WIDTH) -> str:
-    # Pad the label BEFORE colorizing: colorizing after padding would
-    # count the (invisible) escape codes toward the field width and
-    # break column alignment the instant color is enabled.
-    return _colorize(f"{label:<{width}}", _COLOR_GRAY, color) + value
+def _truncate(text: str, max_len: int) -> str:
+    """Shorten text to fit max_len, marking the cut with an ellipsis.
+
+    Always operates on plain text - callers must truncate before adding
+    any ANSI color codes, since counting escape-sequence bytes toward the
+    visible width would either cut them off mid-sequence or truncate the
+    visible text too early.
+    """
+    if max_len <= 0:
+        return ""
+    if len(text) <= max_len:
+        return text
+    if max_len == 1:
+        return text[:1]
+    return text[: max_len - 1] + "…"
+
+
+def _pack_chunks(chunks: list[tuple[str, str]], width: int) -> list[str]:
+    """Greedily pack (plain, display) chunks onto lines <= width wide.
+
+    Never splits a chunk across lines (a "Mode: ..." value never gets cut
+    off mid-word by an 80-column wrap) - instead it starts a new line.
+    Used for the Header/System Status one-liners so they degrade to two
+    or three lines on a narrow terminal instead of overflowing the
+    terminal's width. plain is used for width math; display may carry
+    ANSI color codes invisible to that math.
+    """
+    lines: list[str] = []
+    # plain_line/display_line accumulate the full line text *including*
+    # its leading space from the moment a line starts - not appended
+    # separately at the end - so every width comparison below is against
+    # the line's true final length. Adding that leading space only after
+    # deciding a line fits was an off-by-one that let lines run one
+    # column past the terminal's edge.
+    plain_line = ""
+    display_line = ""
+    for plain, display in chunks:
+        if len(plain) + 1 > width:
+            # A single chunk wider than the whole terminal (e.g. a very
+            # long analysis mode name on a tiny terminal): truncate it
+            # standalone and drop any color rather than risk cutting an
+            # escape sequence in half.
+            plain = _truncate(plain, max(0, width - 1))
+            display = plain
+        piece_plain = f" {plain}" if not plain_line else f"   {plain}"
+        piece_display = f" {display}" if not display_line else f"   {display}"
+        if plain_line and len(plain_line) + len(piece_plain) > width:
+            lines.append(display_line)
+            plain_line = f" {plain}"
+            display_line = f" {display}"
+        else:
+            plain_line += piece_plain
+            display_line += piece_display
+    if plain_line:
+        lines.append(display_line)
+    return lines
 
 
 def _rule_label(name: str) -> str:
@@ -198,6 +253,16 @@ def _rule_label(name: str) -> str:
 
 def _receiver_label(row: LiveRow) -> str:
     return row.name if row.constellation in (None, "-") else row.constellation
+
+
+def _receiver_cell_label(row: LiveRow) -> str:
+    """"GPS (NEO-6M)" style identifier for the receiver table's own
+    column - shows both the constellation and the physical unit, unlike
+    _receiver_label's shorter constellation-only form used in the Event
+    Log/Triggered Analysis, where the model name would just be noise."""
+    if row.constellation in (None, "-") or row.constellation == row.name:
+        return row.name
+    return f"{row.constellation} ({row.name})"
 
 
 def _coord_text(value: Optional[float]) -> str:
@@ -239,128 +304,268 @@ def _format_age(seconds: float) -> str:
     return f"{seconds / 60:.0f}m"
 
 
-def _last_update_text(last_update_wall: Optional[float], now: datetime) -> str:
+def _age_text(last_update_wall: Optional[float], now: datetime) -> str:
     if last_update_wall is None:
         return "-"
     updated_at = datetime.fromtimestamp(last_update_wall)
     age_s = max(0.0, (now - updated_at).total_seconds())
-    return f"{updated_at:%H:%M:%S} ({_format_age(age_s)} ago)"
+    return _format_age(age_s)
 
 
 # ---------------------------------------------------------------------------
-# Sections - each takes (model, color) and returns the lines it owns.
+# Sections - each takes (model, color, width[, ...]) and returns the lines
+# it owns, already fitted to width. Fixed sections (header/status/table)
+# always render in full; the lower-priority sections (triggered analysis,
+# event log) additionally take a max_lines budget and shrink - down to
+# nothing - to fit whatever height is left over.
 # ---------------------------------------------------------------------------
 
 
-def _render_header(model: DashboardModel, color: bool) -> list[str]:
-    return [
-        _BAR,
-        f" {model.title}",
-        _BAR,
-        "",
-        _field("Time:", f"{model.generated_at:%Y-%m-%d %H:%M:%S}", color),
-        _field("Uptime:", _format_duration(model.uptime_s), color),
-        _field("Version:", model.app_version, color),
-        "",
+def _render_header(
+    model: DashboardModel,
+    color: bool,
+    width: int,
+    term_size: Optional[tuple[int, int]] = None,
+) -> list[str]:
+    bar = "=" * width
+    title = _truncate(f" {model.title}", width)
+    chunks = [
+        (
+            f"Time {model.generated_at:%H:%M:%S}",
+            f"Time {model.generated_at:%H:%M:%S}",
+        ),
+        (
+            f"Uptime {_format_duration(model.uptime_s)}",
+            f"Uptime {_format_duration(model.uptime_s)}",
+        ),
+        (f"v{model.app_version}", f"v{model.app_version}"),
     ]
+    if term_size is not None:
+        text = f"Terminal: {term_size[0]}x{term_size[1]}"
+        chunks.append((text, text))
+    return [bar, title, *_pack_chunks(chunks, width)]
 
 
-def _render_system_status(model: DashboardModel, color: bool) -> list[str]:
+def _render_system_status(model: DashboardModel, color: bool, width: int) -> list[str]:
     rows = model.rows
-    online = sum(1 for row in rows if row.connection is ConnectionStatus.CONNECTED)
 
     def _count(state: HealthState) -> int:
         return sum(
             1 for row in rows if row.analysis is not None and row.analysis.state is state
         )
 
+    online = sum(1 for row in rows if row.connection is ConnectionStatus.CONNECTED)
     overall = _overall_severity(rows)
-    overall_text = _colorize(
-        _SEVERITY_LABELS[overall], _SEVERITY_COLOR[overall], color
-    )
-    return [
-        _RULE,
-        "Overall System Status",
-        _RULE,
-        "",
-        _field("Overall Health:", overall_text, color),
-        _field("Analysis Mode:", model.analysis_mode, color),
-        _field("Receivers Online:", f"{online} / {len(rows)}", color),
-        _field("Warnings:", str(_count(HealthState.WARNING)), color),
-        _field(
-            "Potential Spoofing:", str(_count(HealthState.POTENTIAL_SPOOFING)), color
+    overall_label = _SEVERITY_LABELS[overall]
+    warnings = _count(HealthState.WARNING)
+    potential = _count(HealthState.POTENTIAL_SPOOFING)
+    spoofed = _count(HealthState.SPOOFING_DETECTED)
+
+    chunks = [
+        (
+            f"Health: {overall_label}",
+            f"Health: {_colorize(overall_label, _SEVERITY_COLOR[overall], color)}",
         ),
-        _field(
-            "Spoofing Detected:", str(_count(HealthState.SPOOFING_DETECTED)), color
-        ),
-        "",
+        (f"Mode: {model.analysis_mode}", f"Mode: {model.analysis_mode}"),
+        (f"Online: {online}/{len(rows)}", f"Online: {online}/{len(rows)}"),
+        (f"Warnings: {warnings}", f"Warnings: {warnings}"),
+        (f"Potential Spoofing: {potential}", f"Potential Spoofing: {potential}"),
+        (f"Spoofing Detected: {spoofed}", f"Spoofing Detected: {spoofed}"),
     ]
+    rule = "-" * width
+    return [rule, *_pack_chunks(chunks, width), ""]
 
 
-def _render_receiver_status(model: DashboardModel, color: bool) -> list[str]:
-    lines = [_BAR, "Receiver Status", _BAR, ""]
-    rows = model.rows
-    for index, row in enumerate(rows):
-        severity = _row_severity(row)
-        status_text = _colorize(
-            _row_status_text(row), _SEVERITY_COLOR[severity], color
-        )
-        if row.constellation not in (None, "-"):
-            header = f"{row.constellation} ({row.name})"
-        else:
-            header = row.name
-        lines.append(header)
-        lines.append("")
-        lines.append(_field("Status:", status_text, color))
-        lines.append(_field("Score:", _score_text(row), color))
-        lines.append(_field("Fix:", _fix_text(row), color))
-        lines.append(_field("Latitude:", _coord_text(row.latitude_deg), color))
-        lines.append(_field("Longitude:", _coord_text(row.longitude_deg), color))
-        lines.append(_field("Satellites:", _int_text(row.num_satellites), color))
-        lines.append(_field("HDOP:", _hdop_text(row.hdop), color))
-        lines.append(_field("Distance:", _distance_text(row.distance_m), color))
-        lines.append(
-            _field(
-                "Last Update:",
-                _last_update_text(row.last_update_wall, model.generated_at),
-                color,
+@dataclass(frozen=True)
+class _Column:
+    key: str
+    header: str
+    align: str = "left"
+
+
+# Priority order: earliest columns are kept longest as width tightens.
+# Receiver/Status/Score/Lat/Lon are the non-negotiable core - a GNSS
+# monitor without a position or a score isn't showing anything useful.
+_TABLE_COLUMNS = [
+    _Column("receiver", "Receiver"),
+    _Column("status", "Status"),
+    _Column("score", "Score", "right"),
+    _Column("lat", "Lat", "right"),
+    _Column("lon", "Lon", "right"),
+    _Column("fix", "Fix"),
+    _Column("sat", "Sat", "right"),
+    _Column("hdop", "HDOP", "right"),
+    _Column("dist", "Dist", "right"),
+    _Column("age", "Age", "right"),
+]
+_CORE_COLUMN_COUNT = 5
+
+
+def _row_table_values(
+    row: LiveRow, now: datetime, compact_receiver: bool = False
+) -> dict[str, str]:
+    receiver_label = _receiver_label(row) if compact_receiver else _receiver_cell_label(row)
+    return {
+        "receiver": _truncate(receiver_label, _MAX_RECEIVER_CELL),
+        "status": _row_status_text(row),
+        "score": _score_text(row),
+        "lat": _coord_text(row.latitude_deg),
+        "lon": _coord_text(row.longitude_deg),
+        "fix": _fix_text(row),
+        "sat": _int_text(row.num_satellites),
+        "hdop": _hdop_text(row.hdop),
+        "dist": _distance_text(row.distance_m),
+        "age": _age_text(row.last_update_wall, now),
+    }
+
+
+def _select_columns(
+    values_per_row: list[dict[str, str]], width: int
+) -> tuple[list[_Column], dict[str, int]]:
+    """Widest column set that fits width, dropping lowest-priority first.
+
+    Stops shrinking at the core 5 columns even if that still doesn't fit
+    - on a terminal too narrow even for that, _render_receiver_table's
+    line-level _truncate is the last line of defense.
+    """
+    columns = list(_TABLE_COLUMNS)
+    while True:
+        widths = {
+            col.key: max(
+                len(col.header),
+                max((len(v[col.key]) for v in values_per_row), default=0),
             )
-        )
+            for col in columns
+        }
+        total = sum(widths.values()) + len(_COL_SEP) * max(0, len(columns) - 1)
+        if total <= width or len(columns) <= _CORE_COLUMN_COUNT:
+            return columns, widths
+        columns = columns[:-1]
+
+
+def _render_receiver_table(
+    model: DashboardModel, color: bool, width: int, max_rows: Optional[int] = None
+) -> list[str]:
+    bar = "=" * width
+    lines = [bar, "Receiver Status", bar, ""]
+    rows = model.rows
+    if not rows:
+        lines.append(_colorize("  No receivers configured", _COLOR_GRAY, color))
         lines.append("")
-        if index < len(rows) - 1:
-            lines.append(_RULE)
-            lines.append("")
+        return lines
+
+    hidden = 0
+    shown_rows = rows
+    if max_rows is not None and len(rows) > max(1, max_rows):
+        budget = max(1, max_rows - 1) if max_rows > 1 else max_rows
+        shown_rows = rows[:budget]
+        hidden = len(rows) - len(shown_rows)
+
+    now = model.generated_at
+    values_per_row = [_row_table_values(row, now) for row in shown_rows]
+    severities = [_row_severity(row) for row in shown_rows]
+    columns, widths = _select_columns(values_per_row, width)
+
+    def _row_width(cols: list[_Column], w: dict[str, int]) -> int:
+        return sum(w.values()) + len(_COL_SEP) * max(0, len(cols) - 1)
+
+    if _row_width(columns, widths) > width and len(columns) <= _CORE_COLUMN_COUNT:
+        # Even the core 5 columns don't fit at full receiver-label width
+        # (e.g. "Reference (LC29HEA)" on a ~45-column terminal): drop the
+        # parenthetical model name and fall back to the shorter
+        # constellation-only label before resorting to raw truncation.
+        compact_values = [
+            _row_table_values(row, now, compact_receiver=True) for row in shown_rows
+        ]
+        compact_columns, compact_widths = _select_columns(compact_values, width)
+        if _row_width(compact_columns, compact_widths) < _row_width(columns, widths):
+            values_per_row, columns, widths = compact_values, compact_columns, compact_widths
+
+    header_cells = [
+        _colorize(f"{col.header:<{widths[col.key]}}", _COLOR_GRAY, color) for col in columns
+    ]
+    # A safety net, not the primary mechanism: _select_columns stops
+    # shrinking at the core 5 columns even if their *content* (e.g. a
+    # long "Reference (LC29HEA)" receiver label) still doesn't fit a
+    # narrow terminal - this truncates the header row to match, the same
+    # way each data row already does below.
+    lines.append(_truncate(_COL_SEP.join(header_cells).rstrip(), width))
+    lines.append("-" * width)
+
+    for values, severity in zip(values_per_row, severities):
+        cells = []
+        for col in columns:
+            raw = values[col.key]
+            aligned = (
+                f"{raw:<{widths[col.key]}}"
+                if col.align == "left"
+                else f"{raw:>{widths[col.key]}}"
+            )
+            if col.key == "status":
+                aligned = _colorize(aligned, _SEVERITY_COLOR[severity], color)
+            cells.append(aligned)
+        lines.append(_truncate(_COL_SEP.join(cells).rstrip(), width))
+    if hidden:
+        lines.append(
+            _truncate(f"  … {hidden} more receiver(s) not shown (enlarge terminal)", width)
+        )
+    lines.append("")
     return lines
 
 
-def _render_triggered_analysis(model: DashboardModel, color: bool) -> list[str]:
-    lines = [_BAR, "Triggered Analysis", _BAR, ""]
+def _render_triggered_analysis(
+    model: DashboardModel, color: bool, width: int, max_lines: int
+) -> list[str]:
+    """Rendered only when something is actually flagged (collapses to
+    nothing otherwise) and clipped to whatever height remains after the
+    header/status/receiver-table sections - it is lower priority than the
+    receiver table but higher than the Event Log.
+    """
     flagged = [
         row for row in model.rows if row.analysis is not None and row.analysis.triggered_rules
     ]
-    if not flagged:
-        lines.append(_colorize("  No active triggers", _COLOR_GRAY, color))
-        lines.append("")
-        return lines
+    if not flagged or max_lines <= 0:
+        return []
+
+    bar = "=" * width
+    lines = [bar, "Triggered Analysis", bar, ""]
     for row in flagged:
-        lines.append(_receiver_label(row))
+        lines.append(_truncate(_receiver_label(row), width))
         for outcome in row.analysis.triggered_rules:  # type: ignore[union-attr]
-            lines.append(f"  • {_rule_label(outcome.name)}")
+            lines.append(_truncate(f"  • {_rule_label(outcome.name)}", width))
         lines.append("")
-    return lines
+    if lines and lines[-1] == "":
+        lines.pop()
+
+    if len(lines) <= max_lines:
+        return lines
+    if max_lines <= 1:
+        return lines[:max_lines]
+    return lines[: max_lines - 1] + [_truncate("  … additional triggers not shown", width)]
 
 
 def _render_event_log(
-    model: DashboardModel, color: bool, max_events: int
+    model: DashboardModel, color: bool, width: int, max_lines: int
 ) -> list[str]:
-    lines = [_BAR, "Event Log", _BAR, ""]
-    events = list(model.events)[: max(0, max_events)]
+    """Lowest priority section: gets whatever height is left, down to
+    nothing (the whole section, including its header, disappears when
+    there's no room - unlike the receiver table and Triggered Analysis,
+    losing the Event Log doesn't hide anything safety-relevant)."""
+    bar = "=" * width
+    chrome = [bar, "Event Log", bar]
+    if max_lines < len(chrome):
+        return []
+
+    lines = list(chrome)
+    budget = max_lines - len(chrome)
+    events = list(model.events)[:budget]
     if not events:
-        lines.append(_colorize("  (no events yet)", _COLOR_GRAY, color))
-        return lines
-    for event in events:
-        timestamp = datetime.fromtimestamp(event.wall_time).strftime("%H:%M:%S")
-        lines.append(f"  {timestamp}  {event.message}")
+        if budget > 0:
+            lines.append(_colorize("  (no events yet)", _COLOR_GRAY, color))
+    else:
+        for event in events:
+            timestamp = datetime.fromtimestamp(event.wall_time).strftime("%H:%M:%S")
+            lines.append(_truncate(f"  {timestamp}  {event.message}", width))
     return lines
 
 
@@ -419,10 +624,15 @@ class TerminalLiveDashboard(LiveDashboard):
     broken on replay). Non-terminal stdout (systemd/journald, redirected
     to a file, piped) always uses the plain rendering regardless of this
     flag, since there is no screen to redraw in place.
+
+    `debug=True` appends the detected terminal size ("Terminal: 120x35")
+    to the header - useful when diagnosing why a section got dropped or
+    columns got trimmed on a particular SSH client/terminal emulator.
     """
 
-    def __init__(self, clear: bool = True) -> None:
+    def __init__(self, clear: bool = True, debug: bool = False) -> None:
         self._clear = clear
+        self._debug = debug
         self._max_lines_drawn = 0
 
     def _in_place(self) -> bool:
@@ -455,21 +665,60 @@ class TerminalLiveDashboard(LiveDashboard):
     # -- internals ------------------------------------------------------
 
     def _lines(self, model: DashboardModel, color: bool) -> list[str]:
-        fixed = [
-            *_render_header(model, color),
-            *_render_system_status(model, color),
-            *_render_receiver_status(model, color),
-            *_render_triggered_analysis(model, color),
-        ]
-        _, term_rows = shutil.get_terminal_size(fallback=(100, 40))
-        budget = max(
-            _MIN_EVENT_LINES, term_rows - len(fixed) - _EVENT_LOG_CHROME_LINES
-        )
-        return fixed + _render_event_log(model, color, max_events=budget)
+        cols, term_rows = shutil.get_terminal_size(fallback=(100, 40))
+        # cols - 1, not cols: writing exactly `cols` visible characters
+        # then our own newline leaves some terminals in a "pending wrap"
+        # state that behaves as an extra blank row - trivial to avoid by
+        # never claiming the very last column.
+        width = max(1, cols - 1)
+        available = max(1, term_rows - 1)
+        term_size = (cols, term_rows) if self._debug else None
+
+        header = _render_header(model, color, width, term_size)
+        status = _render_system_status(model, color, width)
+        # The receiver table is the one section that must "always remain
+        # visible", so it renders in full first. But "never exceed
+        # terminal height" is the harder constraint: if header + status +
+        # every receiver row still doesn't fit (a terminal too short for
+        # the receiver count), shrink the table's own row count - showing
+        # as many receivers as fit plus a "N more not shown" notice -
+        # rather than let the frame push past the bottom of the screen.
+        table = _render_receiver_table(model, color, width)
+        fixed = header + status + table
+        if len(fixed) > available:
+            max_rows = len(model.rows)
+            chrome = len(header) + len(status)
+            while max_rows > 1:
+                max_rows -= 1
+                table = _render_receiver_table(model, color, width, max_rows=max_rows)
+                if chrome + len(table) <= available:
+                    break
+            fixed = header + status + table
+        remaining = max(0, available - len(fixed))
+
+        triggered = _render_triggered_analysis(model, color, width, remaining)
+        remaining = max(0, remaining - len(triggered))
+
+        events = _render_event_log(model, color, width, remaining) if remaining > 0 else []
+
+        result = fixed + triggered + events
+        if len(result) > available:
+            # Last resort for a terminal too small even for the header,
+            # status, and a one-row table combined: clip rather than let
+            # anything force the terminal to scroll.
+            result = result[:available]
+        return result
 
     def _draw_in_place(self, lines: list[str]) -> None:
         _, term_rows = shutil.get_terminal_size(fallback=(100, 40))
-        height = min(max(len(lines), self._max_lines_drawn), max(1, term_rows - 1))
+        cap = max(1, term_rows - 1)
+        if len(lines) > cap:
+            # Belt and suspenders: _lines() already budgets to fit, but a
+            # frame taller than the terminal is exactly what forces the
+            # terminal to scroll out from under a fixed cursor-home
+            # redraw, so this is enforced again right before the write.
+            lines = lines[:cap]
+        height = min(max(len(lines), self._max_lines_drawn), cap)
         self._max_lines_drawn = height
         padded = lines + [""] * max(0, height - len(lines))
         # Cursor home (never a full clear - that's what causes flicker),

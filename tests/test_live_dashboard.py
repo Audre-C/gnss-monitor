@@ -40,6 +40,41 @@ def render(rows: list[LiveRow], events: tuple[LogEvent, ...] = ()) -> str:
     return TerminalLiveDashboard(clear=False).render_frame(model_for(rows, events))
 
 
+def _table_header(frame: str) -> list[str]:
+    """Parse the Receiver Status table's column header row.
+
+    Layout is fixed by _render_receiver_table: "Receiver Status" is
+    preceded by a bar and followed by [bar, blank, header, rule, ...
+    data rows ..., blank] - a structural offset, not text search, so it
+    doesn't get confused by whatever section follows (Triggered
+    Analysis and Event Log are both optional/collapsible).
+    """
+    import re
+
+    lines = frame.splitlines()
+    idx = lines.index("Receiver Status")
+    return re.split(r"\s{2,}", lines[idx + 3].strip())
+
+
+def _table_rows(frame: str) -> list[list[str]]:
+    """Parse the Receiver Status table's data rows (see _table_header).
+
+    Columns are separated by runs of 2+ spaces (see _COL_SEP / the
+    per-column padding in _render_receiver_table), which never occur
+    inside a single cell's own text.
+    """
+    import re
+
+    lines = frame.splitlines()
+    idx = lines.index("Receiver Status")
+    rows = []
+    for ln in lines[idx + 5 :]:
+        if not ln.strip():
+            break
+        rows.append(re.split(r"\s{2,}", ln.strip()))
+    return rows
+
+
 class TestHeaderAndSystemStatus:
     def test_header_shows_title_uptime_and_version(self) -> None:
         frame = render([])
@@ -74,10 +109,9 @@ class TestHeaderAndSystemStatus:
             ),
         ]
         frame = render(rows)
-        assert "Overall System Status" in frame
-        assert "Receivers Online:" in frame
-        assert "2 / 2" in frame
-        assert "Warnings:" in frame
+        assert "Health:" in frame
+        assert "Online: 2/2" in frame
+        assert "Warnings: 1" in frame
 
 
 class TestStatusText:
@@ -92,8 +126,10 @@ class TestStatusText:
             analysis=AnalysisResult("gps", 0.0, HealthState.OK, ()),
         )
         frame = render([row])
-        assert "Score:" in frame
-        assert "OK" in frame
+        header = _table_header(frame)
+        (data_row,) = _table_rows(frame)
+        assert data_row[header.index("Status")] == "OK"
+        assert data_row[header.index("Score")] == "0"
 
     def test_warning_state_renders(self) -> None:
         row = LiveRow(
@@ -148,8 +184,10 @@ class TestStatusText:
             longitude_deg=51.4,
         )
         frame = render([row])
-        score_line = next(ln for ln in frame.splitlines() if ln.startswith("Score:"))
-        assert score_line.rstrip() == "Score:              -"
+        header = _table_header(frame)
+        (data_row,) = _table_rows(frame)
+        assert data_row[header.index("Score")] == "-"
+        assert data_row[header.index("Status")] == "OK"
 
 
 class TestReceiverFields:
@@ -188,7 +226,10 @@ class TestReceiverFields:
 
 
 class TestTriggeredAnalysisSection:
-    def test_no_active_triggers_message_when_all_clean(self) -> None:
+    def test_section_is_omitted_entirely_when_all_clean(self) -> None:
+        # Preferred layout: Triggered Analysis only appears "if non-empty"
+        # - an all-clean frame collapses the section rather than wasting
+        # a scarce line on a placeholder message.
         row = LiveRow(
             name="GPS",
             constellation="GPS",
@@ -199,8 +240,7 @@ class TestTriggeredAnalysisSection:
             analysis=AnalysisResult("gps", 0.0, HealthState.OK, ()),
         )
         frame = render([row])
-        assert "Triggered Analysis" in frame
-        assert "No active triggers" in frame
+        assert "Triggered Analysis" not in frame
 
     def test_section_lists_display_labels_for_flagged_receivers(self) -> None:
         flagged = LiveRow(

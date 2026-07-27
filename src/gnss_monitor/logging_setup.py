@@ -18,11 +18,24 @@ _MAX_BYTES = 5 * 1024 * 1024  # 5 MB per file
 _BACKUP_COUNT = 5
 
 
-def setup_logging(log_dir: Path, level: str) -> logging.Logger:
+def setup_logging(log_dir: Path, level: str, console: bool = True) -> logging.Logger:
     """Configure and return the application root logger.
 
-    Creates the log directory if necessary. Logs go to both the console
-    and a rotating file (log_dir/app.log). Safe to call once at startup.
+    Creates the log directory if necessary. Logs go to a rotating file
+    (log_dir/app.log) always, and additionally to the console
+    (StreamHandler, which defaults to stderr) when console=True. Safe to
+    call once at startup.
+
+    Pass console=False when an interactive TUI is about to take over the
+    terminal: over a plain SSH session, stdout and stderr share the same
+    physical screen, so any log line written to stderr - a reconnect
+    retry warning, a state-change notice - lands on the terminal outside
+    of the dashboard's own cursor-controlled redraw, which either forces
+    the terminal to scroll or leaves stray text behind. The rotating
+    file still gets everything regardless; only the screen echo is
+    suppressed. Non-interactive runs (systemd/journald, redirected
+    output) keep the console handler, since that's what journalctl -f
+    depends on for both the dashboard frames and diagnostics.
     """
     log_dir.mkdir(parents=True, exist_ok=True)
 
@@ -36,9 +49,10 @@ def setup_logging(log_dir: Path, level: str) -> logging.Logger:
 
     formatter = logging.Formatter(LOG_FORMAT, datefmt=DATE_FORMAT)
 
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
+    if console:
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
 
     file_handler = logging.handlers.RotatingFileHandler(
         log_dir / "app.log",

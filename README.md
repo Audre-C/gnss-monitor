@@ -31,13 +31,14 @@ gnss-monitor --config config/live_rpi.yaml
 # Live Dashboard (TUI)
 
 Live mode (`--mode live`, or `--mode auto` with an all-serial config)
-now renders a fixed, htop/btop-style terminal dashboard that redraws in
-place instead of scrolling: Header (time/uptime/version), Overall System
-Status, one block per receiver (status, score, fix, position,
-satellites, HDOP, distance from expected, last update), Triggered
-Analysis (which rules fired and why, when the `analysis:` section is
-configured), and a rolling Event Log of the last ~12 events (connects,
-disconnects, fix acquired/lost, health/analysis state changes).
+renders a fixed, htop/btop-style terminal dashboard that redraws in
+place instead of scrolling: a compact Header (time/uptime/version) and
+Overall System Status line, a Receiver Status table (one row per
+receiver: status, score, position, fix, satellites, HDOP, distance,
+last-update age), Triggered Analysis (which rules fired and why, when
+the `analysis:` section is configured), and a rolling Event Log
+(connects, disconnects, fix acquired/lost, health/analysis state
+changes).
 
 This only activates when stdout is an actual terminal (an interactive
 SSH session). Anywhere else - `systemd`/`journalctl`, output redirected
@@ -46,14 +47,49 @@ timestamped, append-only frames, which is what makes
 `journalctl -u gnss-monitor -f` (see below) readable instead of full of
 raw cursor-control escape codes.
 
+**Fits any terminal size.** The dashboard measures the real terminal
+size every frame (`shutil.get_terminal_size`) and never exceeds it,
+in either direction:
+
+- The Receiver Status table always shows every configured receiver; its
+  columns shrink from the outside in (Age, then Distance, then HDOP,
+  then Satellites, then Fix) as the terminal gets narrower, keeping
+  Receiver/Status/Score/Lat/Lon - the columns this tool exists for -
+  until there is truly no room left.
+- Triggered Analysis and the Event Log are lower priority: they shrink,
+  and finally disappear entirely, before the receiver table ever would.
+- Long text (an event message, a receiver label) is truncated with `…`
+  rather than wrapped - a wrapped line is exactly what makes a fixed
+  in-place redraw look broken.
+- On a terminal too short even for the receiver table itself, the table
+  falls back to showing as many rows as fit plus a "N more receiver(s)
+  not shown" notice, rather than push content past the bottom of the
+  screen.
+
+**The TUI owns the terminal while it's running.** When live mode starts
+against an interactive terminal, diagnostic log lines (reconnect
+retries, state-change notices) stop going to the console - only to the
+rotating log file - since stdout and stderr share the same physical
+screen over plain SSH, and any line printed outside the dashboard's own
+redraw would push the screen down and make it look like it's scrolling.
+Nothing is lost: the same information already appears in the Event Log
+section, and the file log still gets everything. This only applies to
+the interactive TUI; `journalctl -u gnss-monitor -f` (non-interactive)
+keeps seeing diagnostics on the console exactly as before.
+
 Colors are minimal and only used for the health state itself: green
 (OK), yellow (Warning), bold yellow standing in for orange (Potential
 Spoofing - most terminals don't have a true ANSI "orange"), bold red
 (Spoofing Detected). Field labels are dim gray; everything else is your
 terminal's default color.
 
-No new CLI flags were needed for this - the dashboard adapts to whatever
-terminal it's attached to automatically.
+One new CLI flag: `--dashboard-debug` appends the detected terminal
+size ("Terminal: 120x35") to the header, for diagnosing why a column or
+section got dropped on a particular terminal/SSH client.
+
+```bash
+gnss-monitor --config config/live_rpi.yaml --dashboard-debug
+```
 
 ---
 

@@ -105,6 +105,21 @@ class TestTtyMode:
         second_frame_lines = fake.getvalue().count("\n")
         assert second_frame_lines == tall_frame_lines
 
+    def test_draw_in_place_never_writes_more_lines_than_the_terminal(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression test for the "dashboard exceeds terminal size" bug:
+        # a frame taller than the terminal forces the terminal itself to
+        # scroll, which breaks the fixed cursor-home redraw no matter how
+        # correct the escape sequences are.
+        fake = use_fake_tty(monkeypatch)
+        monkeypatch.setattr("shutil.get_terminal_size", lambda fallback=(80, 24): (80, 10))
+        dashboard = TerminalLiveDashboard()
+        dashboard._draw_in_place([f"line {i}" for i in range(100)])
+        output = fake.getvalue()
+        # \x1b[H is written once up front; every drawn row ends in \x1b[K.
+        assert output.count("\x1b[K") <= 9  # term_rows - 1
+
     def test_color_codes_present_in_tty_mode(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
