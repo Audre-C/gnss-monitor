@@ -13,6 +13,7 @@ from gnss_monitor.config.schema import (
     OverallThresholdsConfig,
     PositionScoringConfig,
     SatellitesScoringConfig,
+    SignalScoringConfig,
     SpeedScoringConfig,
     TimeScoringConfig,
 )
@@ -45,6 +46,40 @@ def build_config() -> AnalysisConfig:
     )
 
 
+def build_config_with_signal() -> AnalysisConfig:
+    """Same as build_config(), plus a signal: section - used only by the
+    tests that need signal_anomaly wired in; every other test relies on
+    build_config()'s signal=None to prove backward compatibility."""
+    return AnalysisConfig(
+        position=PositionScoringConfig(
+            warning_radius_m=100.0,
+            failure_radius_m=500.0,
+            weight_warning=20.0,
+            weight_failure=40.0,
+        ),
+        no_fix=NoFixScoringConfig(weight=30.0),
+        speed=SpeedScoringConfig(
+            stationary_speed_limit_kmh=5.0, warning_speed_kmh=10.0, weight=25.0
+        ),
+        satellites=SatellitesScoringConfig(minimum=5, sudden_drop=3, weight=15.0),
+        hdop=HdopScoringConfig(warning=2.5, critical=5.0, weight=20.0),
+        time=TimeScoringConfig(max_jump_seconds=3.0, weight=30.0),
+        disagreement=DisagreementScoringConfig(
+            max_distance_between_receivers_m=100.0, weight=35.0
+        ),
+        signal=SignalScoringConfig(
+            min_tracked_satellites=4,
+            uniform_std_dbhz=2.0,
+            uniform_min_mean_dbhz=40.0,
+            max_mean_cn0_dbhz=50.0,
+            weight=30.0,
+        ),
+        overall=OverallThresholdsConfig(
+            warning=30.0, potential_spoofing=60.0, spoofing=90.0
+        ),
+    )
+
+
 def healthy_sample(**overrides) -> ReceiverSample:
     defaults = dict(
         has_fix=True,
@@ -65,6 +100,14 @@ def make_evaluator(reference_ids: frozenset[str] = frozenset()) -> AnalysisEvalu
         expected_latitude_deg=EXPECTED_LAT,
         expected_longitude_deg=EXPECTED_LON,
         reference_receiver_ids=reference_ids,
+    )
+
+
+def make_evaluator_with_signal() -> AnalysisEvaluator:
+    return AnalysisEvaluator(
+        build_config_with_signal(),
+        expected_latitude_deg=EXPECTED_LAT,
+        expected_longitude_deg=EXPECTED_LON,
     )
 
 
@@ -171,3 +214,38 @@ class TestDisagreement:
         assert not any(o.name == "disagreement" for o in results["ref"].triggered_rules)
         assert not any(o.name == "disagreement" for o in results["a"].triggered_rules)
         assert not any(o.name == "disagreement" for o in results["b"].triggered_rules)
+
+
+class TestSignalAnomalyThroughEvaluator:
+    def test_signal_not_configured_adds_no_points(self) -> None:
+        # Backward compatibility: an analysis: block without a signal:
+        # section must score exactly as it did before this indicator
+        # existed, even for a sample whose C/N0 would otherwise trigger.
+        evaluator = make_evaluator()
+        evaluator.update("gps", healthy_sample(cn0_dbhz=(48, 49, 48, 50, 49)))
+        result = evaluator.evaluate_all()["gps"]
+        assert result.score == 0.0
+        assert result.state is HealthState.OK
+        assert not any(o.name == "signal_anomaly" for o in result.triggered_rules)
+
+    def test_uniform_high_cn0_raises_score_when_configured(self) -> None:
+        evaluator = make_evaluator_with_signal()
+        evaluator.update("gps", healthy_sample(cn0_dbhz=(48, 49, 48, 50, 49)))
+        result = evaluator.evaluate_all()["gps"]
+        assert result.score == 30.0
+        assert result.state is HealthState.WARNING
+        assert any(o.name == "signal_anomaly" for o in result.triggered_rules)
+
+    def test_reference_receiver_is_still_scored_for_signal(self) -> None:
+        # Unlike disagreement, signal_anomaly is a per-receiver check with
+        # nothing to compare against another receiver for, so it applies
+        # to the reference/multi-constellation receiver too.
+        evaluator = AnalysisEvaluator(
+            build_config_with_signal(),
+            expected_latitude_deg=EXPECTED_LAT,
+            expected_longitude_deg=EXPECTED_LON,
+            reference_receiver_ids=frozenset({"ref"}),
+        )
+        evaluator.update("ref", healthy_sample(cn0_dbhz=(48, 49, 48, 50, 49)))
+        result = evaluator.evaluate_all()["ref"]
+        assert any(o.name == "signal_anomaly" for o in result.triggered_rules)

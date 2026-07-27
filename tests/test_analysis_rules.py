@@ -12,6 +12,7 @@ from gnss_monitor.config.schema import (
     NoFixScoringConfig,
     PositionScoringConfig,
     SatellitesScoringConfig,
+    SignalScoringConfig,
     SpeedScoringConfig,
     TimeScoringConfig,
 )
@@ -52,6 +53,16 @@ def time_config() -> TimeScoringConfig:
 def disagreement_config() -> DisagreementScoringConfig:
     return DisagreementScoringConfig(
         max_distance_between_receivers_m=100.0, weight=35.0
+    )
+
+
+def signal_config() -> SignalScoringConfig:
+    return SignalScoringConfig(
+        min_tracked_satellites=4,
+        uniform_std_dbhz=2.0,
+        uniform_min_mean_dbhz=40.0,
+        max_mean_cn0_dbhz=50.0,
+        weight=30.0,
     )
 
 
@@ -270,3 +281,54 @@ class TestDisagreement:
         outcome = rules.disagreement("a", positions, disagreement_config())
         assert outcome.triggered is True
         assert outcome.points == 35.0
+
+
+class TestSignalAnomaly:
+    def test_realistic_spread_does_not_trigger(self) -> None:
+        outcome = rules.signal_anomaly(
+            ReceiverSample(cn0_dbhz=(45, 38, 22, 30, 41, 27)), signal_config()
+        )
+        assert outcome.triggered is False
+        assert outcome.points == 0.0
+
+    def test_uniform_high_triggers(self) -> None:
+        # std ~0.75 dB-Hz (well under 2.0), mean 48.8 (at/above 40) -
+        # triggers via the uniformity condition, not the ceiling
+        # (mean stays below max_mean_cn0_dbhz=50).
+        outcome = rules.signal_anomaly(
+            ReceiverSample(cn0_dbhz=(48, 49, 48, 50, 49)), signal_config()
+        )
+        assert outcome.triggered is True
+        assert outcome.points == 30.0
+
+    def test_implausibly_high_mean_triggers(self) -> None:
+        # mean 53.6 (at/above 50) with a natural-ish spread (std ~2.7,
+        # above uniform_std_dbhz=2.0) - triggers via the ceiling
+        # condition, not uniformity.
+        outcome = rules.signal_anomaly(
+            ReceiverSample(cn0_dbhz=(52, 55, 50, 58, 53)), signal_config()
+        )
+        assert outcome.triggered is True
+        assert outcome.points == 30.0
+
+    def test_fewer_than_minimum_tracked_does_not_trigger(self) -> None:
+        outcome = rules.signal_anomaly(
+            ReceiverSample(cn0_dbhz=(45, 38, 22)), signal_config()
+        )
+        assert outcome.triggered is False
+        assert outcome.points == 0.0
+
+    def test_missing_cn0_does_not_trigger(self) -> None:
+        outcome = rules.signal_anomaly(
+            ReceiverSample(cn0_dbhz=None), signal_config()
+        )
+        assert outcome.triggered is False
+        assert outcome.points == 0.0
+
+    def test_uniform_but_weak_does_not_trigger(self) -> None:
+        # Low variance alone is not suspicious - only a uniform set that
+        # is also elevated (mean >= uniform_min_mean_dbhz) is.
+        outcome = rules.signal_anomaly(
+            ReceiverSample(cn0_dbhz=(20, 21, 20, 19, 20)), signal_config()
+        )
+        assert outcome.triggered is False

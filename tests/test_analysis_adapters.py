@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import time
+
 from gnss_monitor.analysis.adapters import receiver_sample_from_state
-from gnss_monitor.model import FixQuality
+from gnss_monitor.model import FixQuality, SatelliteInfo
 from gnss_monitor.monitor.receiver_monitor import ReceiverState
 
 
@@ -36,3 +38,19 @@ def test_default_state_yields_no_fix_sample_with_no_data() -> None:
     assert sample.hdop is None
     assert sample.speed_mps is None
     assert sample.utc_time_s is None
+    assert sample.cn0_dbhz == ()
+
+
+def test_cn0_dbhz_is_populated_from_tracked_satellites() -> None:
+    state = ReceiverState()
+    state.record_tracked_satellites(
+        "GP",
+        (
+            SatelliteInfo(prn=4, elevation_deg=42, azimuth_deg=298, snr_dbhz=34),
+            SatelliteInfo(prn=9, elevation_deg=14, azimuth_deg=275, snr_dbhz=31),
+        ),
+        t_rx_mono=time.monotonic(),
+    )
+    sample = receiver_sample_from_state(state)
+    assert sample.cn0_dbhz is not None
+    assert sorted(sample.cn0_dbhz) == [31, 34]

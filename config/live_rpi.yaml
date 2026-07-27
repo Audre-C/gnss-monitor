@@ -18,6 +18,16 @@
 # Simple Mode only - and every value below is a starting point, not a
 # calibrated production threshold; tune against real capture data before
 # relying on it operationally.
+#
+# Before running this manually: stop the systemd service first
+# (`sudo systemctl stop gnss-monitor`), or a second copy will fight the
+# running one over the same serial ports. Two processes (or two channels)
+# opening the same device node is what produces pyserial's "device
+# reports readiness to read but returned no data (device disconnected or
+# multiple access on port?)" - a rapid disconnect/reconnect flap, not a
+# real unplug. Prefer the stable /dev/serial/by-id/... names over
+# /dev/ttyCH9344USB* where available, since USB enumeration order can
+# otherwise shift the mapping across reboots or replugs.
 
 app:
   name: gnss-monitor
@@ -116,6 +126,14 @@ analysis:
   disagreement:
     max_distance_between_receivers_m: 100
     weight: 35
+  # Placeholders only - calibrate against a known-clean per-receiver
+  # capture before relying on this operationally.
+  signal:
+    min_tracked_satellites: 4
+    uniform_std_dbhz: 2.0
+    uniform_min_mean_dbhz: 40
+    max_mean_cn0_dbhz: 50
+    weight: 30
   overall:
     warning: 30
     potential_spoofing: 60

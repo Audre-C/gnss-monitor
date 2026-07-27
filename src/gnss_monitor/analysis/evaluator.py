@@ -122,6 +122,13 @@ class AnalysisEvaluator:
                 receiver_id, positions, self._config.disagreement
             )
 
+        if self._config.signal is None:
+            signal_outcome = RuleOutcome(
+                "signal_anomaly", False, 0.0, "signal scoring not configured"
+            )
+        else:
+            signal_outcome = rules.signal_anomaly(sample, self._config.signal)
+
         outcomes = (
             rules.no_fix(sample, self._config.no_fix),
             rules.position_offset(
@@ -134,6 +141,7 @@ class AnalysisEvaluator:
             rules.satellite_anomaly(sample, prior, self._config.satellites),
             rules.hdop_anomaly(sample, self._config.hdop),
             rules.time_discontinuity(sample, prior, self._config.time),
+            signal_outcome,
             disagreement_outcome,
         )
         score = total_score(outcomes)

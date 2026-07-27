@@ -9,13 +9,27 @@ display; those are separate, independent modules.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 from gnss_monitor.framing import Framer
-from gnss_monitor.model import FixQuality, GGAMessage, RMCMessage
+from gnss_monitor.model import (
+    FixQuality,
+    GGAMessage,
+    GSVMessage,
+    RMCMessage,
+    SatelliteInfo,
+)
 from gnss_monitor.parsing import NmeaParser
 from gnss_monitor.sources.base import NMEASource
+
+_CN0_TRACK_TTL_S = 10.0
+"""How long a tracked satellite's C/N0 reading stays "current" after its
+last GSV update, in monotonic seconds. GSV cycles roughly once a second
+on the receivers this project targets, so 10s comfortably survives a
+couple of missed or garbled cycles without holding onto a reading from a
+satellite that has since dropped out of track.
+"""
 
 
 @dataclass
@@ -40,6 +54,64 @@ class ReceiverState:
     evaluator tell "receiver went silent" apart from "receiver is
     still reporting its last known fix" - see PositionEvaluator.evaluate.
     """
+
+    _tracked_cn0: dict[tuple[str, int], tuple[int, float]] = field(
+        default_factory=dict
+    )
+    """Private: (talker, prn) -> (snr_dbhz, t_rx_mono) for satellites most
+    recently reported as tracked (SNR present) in a GSV sentence. Keyed
+    by (talker, prn) rather than prn alone so multi-constellation talkers
+    (GP, GL, GA, GB, ...) never collide on overlapping PRN numbering.
+    Populated by record_tracked_satellites(); read via
+    tracked_cn0_dbhz(). No statistics live here - that is an analysis
+    concern (see gnss_monitor.analysis.rules.signal_anomaly), not an
+    acquisition one.
+    """
+
+    def record_tracked_satellites(
+        self,
+        talker: str,
+        satellites: tuple[SatelliteInfo, ...],
+        t_rx_mono: float,
+    ) -> None:
+        """Update the rolling tracked-satellite C/N0 view from one GSV sentence.
+
+        Only satellites with both a PRN and a populated SNR are recorded:
+        snr_dbhz is None for a satellite that is merely in view but not
+        tracked (see SatelliteInfo), which this view must exclude. Stale
+        entries (older than _CN0_TRACK_TTL_S) are dropped in the same
+        pass, so the map stays bounded over a 24/7 run instead of
+        accumulating every satellite ever seen.
+
+        The dict is replaced wholesale rather than mutated in place: a
+        snapshot taken via dataclasses.replace(state) (see
+        ReceiverWorker.snapshot) shares this dict object by reference, so
+        replacing rather than mutating is what keeps that snapshot's view
+        stable even though this state keeps changing afterwards on the
+        worker thread.
+
+        Independent of has_fix: GSV enumerates satellites in view
+        regardless of whether a fix exists, so this keeps working during
+        a no-fix cold start.
+        """
+        fresh = {
+            key: value
+            for key, value in self._tracked_cn0.items()
+            if t_rx_mono - value[1] <= _CN0_TRACK_TTL_S
+        }
+        for satellite in satellites:
+            if satellite.prn is None or satellite.snr_dbhz is None:
+                continue
+            fresh[(talker, satellite.prn)] = (satellite.snr_dbhz, t_rx_mono)
+        self._tracked_cn0 = fresh
+
+    def tracked_cn0_dbhz(self, now_mono: float) -> tuple[int, ...]:
+        """C/N0 values (dB-Hz) for satellites tracked within the last TTL."""
+        return tuple(
+            snr_dbhz
+            for snr_dbhz, t_rx_mono in self._tracked_cn0.values()
+            if now_mono - t_rx_mono <= _CN0_TRACK_TTL_S
+        )
 
 
 class ReceiverMonitor:
@@ -124,3 +196,16 @@ class ReceiverMonitor:
                     self.state.speed_mps = message.speed_mps
                 if message.utc_time is not None:
                     self.state.last_fix_utc = message.utc_time
+        elif isinstance(message, GSVMessage):
+            # Independent of GGA/RMC and of fix state entirely: satellites
+            # in view are reported whether or not the receiver currently
+            # has a fix, and C/N0 capture must keep working through a
+            # no-fix cold start. talker/t_rx_mono are only absent for a
+            # sentence framed in isolation (e.g. a unit test); skip rather
+            # than guess.
+            talker = message.talker
+            t_rx_mono = message.sentence.t_rx_mono
+            if talker is not None and t_rx_mono is not None:
+                self.state.record_tracked_satellites(
+                    talker, message.satellites, t_rx_mono
+                )

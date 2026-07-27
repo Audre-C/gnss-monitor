@@ -34,6 +34,9 @@ class ReceiverSample:
     utc_time_s is seconds-since-midnight-UTC (0-86400), already parsed
     from whatever raw representation the source used - see
     parse_nmea_utc_seconds() for the standard NMEA "hhmmss.ss" format.
+    cn0_dbhz is the C/N0 (signal strength, dB-Hz) of every currently
+    tracked satellite at sample time, independent of has_fix - it comes
+    from GSV, which is reported whether or not a fix exists.
     """
 
     has_fix: bool = False
@@ -43,6 +46,7 @@ class ReceiverSample:
     hdop: Optional[float] = None
     speed_mps: Optional[float] = None
     utc_time_s: Optional[float] = None
+    cn0_dbhz: Optional[tuple[int, ...]] = None
 
 
 @dataclass

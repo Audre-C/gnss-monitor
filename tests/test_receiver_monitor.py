@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
+from gnss_monitor.model import SatelliteInfo
 from gnss_monitor.monitor import ReceiverMonitor
+from gnss_monitor.monitor.receiver_monitor import _CN0_TRACK_TTL_S, ReceiverState
 from gnss_monitor.sources import FileReplaySource
 from tests.fixtures import dataset_path
 
@@ -62,3 +66,53 @@ def test_void_rmc_does_not_set_speed() -> None:
     m = ReceiverMonitor("r1", "R1", FileReplaySource("r1", dataset_path("neo6m", "normal")))
     m._process_line("$GPRMC,,V,,,,,,,,,,N*53")  # noqa: SLF001
     assert m.state.speed_mps is None
+
+
+class TestGsvTrackedCn0:
+    def test_tracks_only_satellites_with_populated_snr(self) -> None:
+        # PRN 4, 9, 26 report an SNR (tracked); PRN 16 is in view but
+        # untracked (blank SNR field) and must not appear.
+        m = ReceiverMonitor(
+            "r1", "R1", FileReplaySource("r1", dataset_path("neo6m", "normal"))
+        )
+        m._process_line(  # noqa: SLF001
+            "$GPGSV,2,1,08,04,42,298,34,09,14,275,31,16,22,134,,26,32,101,34,1*00"
+        )
+        assert sorted(m.state.tracked_cn0_dbhz(time.monotonic())) == [31, 34, 34]
+
+    def test_works_without_a_fix(self) -> None:
+        # C/N0 capture must not depend on has_fix - GSV is reported
+        # during a no-fix cold start too.
+        m = ReceiverMonitor(
+            "r1", "R1", FileReplaySource("r1", dataset_path("neo6m", "normal"))
+        )
+        m._process_line("$GPGSV,1,1,01,04,42,298,34*00")  # noqa: SLF001
+        assert m.state.has_fix is False
+        assert m.state.tracked_cn0_dbhz(time.monotonic()) == (34,)
+
+    def test_accumulates_across_multiple_constellation_talkers(self) -> None:
+        m = ReceiverMonitor(
+            "r1", "R1", FileReplaySource("r1", dataset_path("neo6m", "normal"))
+        )
+        m._process_line("$GPGSV,1,1,01,04,42,298,34*00")  # noqa: SLF001
+        m._process_line("$GLGSV,1,1,01,65,10,100,40*00")  # noqa: SLF001
+        assert sorted(m.state.tracked_cn0_dbhz(time.monotonic())) == [34, 40]
+
+    def test_entries_older_than_ttl_are_evicted(self) -> None:
+        state = ReceiverState()
+        state.record_tracked_satellites(
+            "GP",
+            (SatelliteInfo(prn=1, elevation_deg=10, azimuth_deg=20, snr_dbhz=30),),
+            t_rx_mono=100.0,
+        )
+        # Still within the TTL just after the update.
+        assert state.tracked_cn0_dbhz(100.0 + _CN0_TRACK_TTL_S - 1.0) == (30,)
+
+        # A later GSV update, once the first has aged past the TTL,
+        # evicts it from the tracked set.
+        state.record_tracked_satellites(
+            "GP",
+            (SatelliteInfo(prn=2, elevation_deg=15, azimuth_deg=25, snr_dbhz=40),),
+            t_rx_mono=100.0 + _CN0_TRACK_TTL_S + 1.0,
+        )
+        assert state.tracked_cn0_dbhz(100.0 + _CN0_TRACK_TTL_S + 1.0) == (40,)

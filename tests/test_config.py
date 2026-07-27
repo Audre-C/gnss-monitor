@@ -222,6 +222,59 @@ class TestAnalysisConfig:
             load_config(write_config(tmp_path, text))
 
 
+SIGNAL_SECTION = """  signal:
+    min_tracked_satellites: 4
+    uniform_std_dbhz: 2.0
+    uniform_min_mean_dbhz: 40
+    max_mean_cn0_dbhz: 50
+    weight: 30
+"""
+
+
+class TestSignalScoringConfig:
+    def test_absent_by_default(self, tmp_path: Path) -> None:
+        # analysis: without a signal: section must still load - existing
+        # configs written before this indicator existed are unaffected.
+        text = VALID_CONFIG + ANALYSIS_SECTION
+        config = load_config(write_config(tmp_path, text))
+        assert config.analysis is not None
+        assert config.analysis.signal is None
+
+    def test_loads_when_present(self, tmp_path: Path) -> None:
+        text = VALID_CONFIG + ANALYSIS_SECTION.replace(
+            "  overall:", SIGNAL_SECTION + "  overall:"
+        )
+        config = load_config(write_config(tmp_path, text))
+        assert config.analysis.signal is not None
+        assert config.analysis.signal.min_tracked_satellites == 4
+        assert config.analysis.signal.uniform_std_dbhz == 2.0
+        assert config.analysis.signal.uniform_min_mean_dbhz == 40
+        assert config.analysis.signal.max_mean_cn0_dbhz == 50
+        assert config.analysis.signal.weight == 30
+
+    def test_min_tracked_satellites_must_be_at_least_one(
+        self, tmp_path: Path
+    ) -> None:
+        signal_section = SIGNAL_SECTION.replace(
+            "min_tracked_satellites: 4", "min_tracked_satellites: 0"
+        )
+        text = VALID_CONFIG + ANALYSIS_SECTION.replace(
+            "  overall:", signal_section + "  overall:"
+        )
+        with pytest.raises(ConfigError):
+            load_config(write_config(tmp_path, text))
+
+    def test_uniform_std_dbhz_must_be_positive(self, tmp_path: Path) -> None:
+        signal_section = SIGNAL_SECTION.replace(
+            "uniform_std_dbhz: 2.0", "uniform_std_dbhz: 0"
+        )
+        text = VALID_CONFIG + ANALYSIS_SECTION.replace(
+            "  overall:", signal_section + "  overall:"
+        )
+        with pytest.raises(ConfigError):
+            load_config(write_config(tmp_path, text))
+
+
 class TestConstellation:
     def test_constellation_field_loads(self, tmp_path: Path) -> None:
         text = VALID_CONFIG.replace(

@@ -5,9 +5,9 @@ current sample (and, for delta-based rules, its previous one) plus the
 relevant slice of AnalysisConfig, it returns a RuleOutcome describing
 whether it triggered, how many points it contributed, and a
 human-readable reason. Pure functions keep every indicator independently
-testable and make adding a new one (C/N0, UBX diagnostics, proprietary
-Quectel diagnostics - all deliberately not implemented yet) a matter of
-writing one more function, never touching the others.
+testable and make adding a new one (UBX diagnostics, proprietary Quectel
+diagnostics - deliberately not implemented yet) a matter of writing one
+more function, never touching the others.
 
 disagreement() is the one indicator that needs every receiver's current
 position rather than just one, so it takes a full id -> (lat, lon)
@@ -25,11 +25,13 @@ Design decisions worth knowing when reading this file:
   discrete step at each radius, not a ramp.
 * satellites has two independent conditions (an absolute floor and a
   relative drop) sharing one weight: either firing scores the full
-  weight once, not additively.
+  weight once, not additively. signal_anomaly mirrors this same pattern
+  (implausibly strong, or uniformly elevated) for the same reason.
 """
 
 from __future__ import annotations
 
+import statistics
 from dataclasses import dataclass
 from typing import Optional
 
@@ -40,6 +42,7 @@ from gnss_monitor.config.schema import (
     NoFixScoringConfig,
     PositionScoringConfig,
     SatellitesScoringConfig,
+    SignalScoringConfig,
     SpeedScoringConfig,
     TimeScoringConfig,
 )
@@ -285,4 +288,53 @@ def disagreement(
         0.0,
         f"{distance_m:.0f} m from the other receivers' centroid "
         "(within tolerance)",
+    )
+
+
+def signal_anomaly(
+    sample: ReceiverSample, config: SignalScoringConfig
+) -> RuleOutcome:
+    """Mean/spread of tracked-satellite C/N0: implausibly strong on
+    average, or suspiciously uniform across satellites.
+
+    A spoofed or simulated signal tends to arrive at one near-constant
+    power rather than the natural spread real sky geometry produces, so
+    a uniformly *elevated* set is suspicious - a genuinely weak,
+    low-variance set (e.g. a poor antenna) is not, hence
+    uniform_min_mean_dbhz gating the uniformity check. Applies to every
+    receiver, including the reference/multi-constellation one: unlike
+    disagreement, this is a per-receiver signal-quality check with
+    nothing to compare against another receiver for.
+
+    Elevation-correlated C/N0 and previous-sample delta detection are
+    deliberately out of scope for now - see the module docstring above.
+    """
+    if (
+        sample.cn0_dbhz is None
+        or len(sample.cn0_dbhz) < config.min_tracked_satellites
+    ):
+        return RuleOutcome(
+            "signal_anomaly", False, 0.0, "not enough tracked C/N0"
+        )
+    mean = statistics.mean(sample.cn0_dbhz)
+    std = statistics.pstdev(sample.cn0_dbhz)
+    implausibly_strong = mean >= config.max_mean_cn0_dbhz
+    uniform_and_elevated = (
+        std <= config.uniform_std_dbhz and mean >= config.uniform_min_mean_dbhz
+    )
+    if implausibly_strong or uniform_and_elevated:
+        return RuleOutcome(
+            "signal_anomaly",
+            True,
+            config.weight,
+            f"{len(sample.cn0_dbhz)} tracked satellites: mean "
+            f"{mean:.1f} dB-Hz, std {std:.1f} dB-Hz "
+            f"({'implausibly strong' if implausibly_strong else 'uniform'})",
+        )
+    return RuleOutcome(
+        "signal_anomaly",
+        False,
+        0.0,
+        f"{len(sample.cn0_dbhz)} tracked satellites: mean {mean:.1f} "
+        f"dB-Hz, std {std:.1f} dB-Hz (normal C/N0 profile)",
     )

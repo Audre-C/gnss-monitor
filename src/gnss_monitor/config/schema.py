@@ -386,6 +386,42 @@ class DisagreementScoringConfig(StrictModel):
     )
 
 
+class SignalScoringConfig(StrictModel):
+    """C/N0 (signal-strength) indicator: two independent conditions, one
+    weight - mirrors SatellitesScoringConfig above. A spoofed or
+    simulated signal tends to arrive at one near-constant power rather
+    than the natural spread real sky geometry produces, so either an
+    implausibly strong mean on its own, or a uniformly elevated set,
+    triggers; either firing scores the full weight once, not additively.
+
+    Elevation-correlated C/N0 checks and previous-sample deltas are
+    deliberately out of scope for now - see the module docstring on
+    gnss_monitor.analysis.rules.
+    """
+
+    min_tracked_satellites: int = Field(
+        ge=1, description="Minimum number of tracked-satellite C/N0 "
+        "readings required to evaluate this indicator at all."
+    )
+    uniform_std_dbhz: float = Field(
+        gt=0.0, description="Population standard deviation (dB-Hz) at "
+        "or below which the tracked set counts as 'uniform'."
+    )
+    uniform_min_mean_dbhz: float = Field(
+        description="Only a uniform set at or above this mean C/N0 "
+        "(dB-Hz) is treated as suspicious, so a genuinely weak, "
+        "low-variance set (e.g. a poor antenna) does not trigger."
+    )
+    max_mean_cn0_dbhz: float = Field(
+        description="Mean C/N0 (dB-Hz) at or above which the signal is "
+        "implausibly strong on its own, regardless of spread."
+    )
+    weight: float = Field(
+        ge=0.0, description="Points contributed when either condition "
+        "is met."
+    )
+
+
 class OverallThresholdsConfig(StrictModel):
     """Score cut-offs mapping a total score to a HealthState."""
 
@@ -426,6 +462,12 @@ class AnalysisConfig(StrictModel):
     hdop: HdopScoringConfig
     time: TimeScoringConfig
     disagreement: DisagreementScoringConfig
+    signal: Optional[SignalScoringConfig] = Field(
+        default=None,
+        description="C/N0 (signal-strength) indicator. Optional so "
+        "existing analysis: blocks written before this indicator "
+        "existed keep loading unchanged.",
+    )
     overall: OverallThresholdsConfig
 
 

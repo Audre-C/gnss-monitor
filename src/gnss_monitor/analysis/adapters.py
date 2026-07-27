@@ -12,6 +12,8 @@ instead of a refactor.
 
 from __future__ import annotations
 
+import time
+
 from gnss_monitor.analysis.state import ReceiverSample, parse_nmea_utc_seconds
 from gnss_monitor.monitor.receiver_monitor import ReceiverState
 
@@ -26,4 +28,5 @@ def receiver_sample_from_state(state: ReceiverState) -> ReceiverSample:
         hdop=state.hdop,
         speed_mps=state.speed_mps,
         utc_time_s=parse_nmea_utc_seconds(state.last_fix_utc),
+        cn0_dbhz=state.tracked_cn0_dbhz(time.monotonic()),
     )
