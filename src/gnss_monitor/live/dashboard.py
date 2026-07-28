@@ -29,9 +29,18 @@ depending on the emulator. This version instead:
 
 The layout itself is a fixed ordered list of section-rendering functions
 (_render_header, _render_system_status, ...), each independent and unit-
-testable. Adding a future section (C/N0, constellation health, a
-teleport comparison, ...) means writing one more such function and
-adding it to that list - nothing here needs restructuring for that.
+testable. Adding a future section (constellation health, a teleport
+comparison, ...) means writing one more such function and adding it to
+that list - nothing here needs restructuring for that. A new *field*
+(like the Avg C/N0 column) usually needs even less: a LiveRow field, an
+entry in _row_table_values/_TABLE_COLUMNS, done.
+
+Architecture note: every number this module renders (scores, rule point
+contributions, distances, C/N0 averages, ...) is computed elsewhere -
+gnss_monitor.analysis for scoring, LiveController for anything derived
+from raw receiver state - and arrives pre-computed on DashboardModel/
+LiveRow. This module only formats, aligns, truncates, and colors; it
+must never itself decide whether something is anomalous.
 """
 
 from __future__ import annotations
@@ -46,6 +55,7 @@ from enum import IntEnum
 from typing import Optional, Sequence
 
 from gnss_monitor.analysis.evaluator import AnalysisResult
+from gnss_monitor.analysis.rules import rule_label
 from gnss_monitor.analysis.score import HealthState
 from gnss_monitor.live.event_log import LogEvent
 from gnss_monitor.live.worker import ConnectionStatus
@@ -60,16 +70,6 @@ _COLOR_GRAY = "\x1b[90m"
 
 _COL_SEP = "  "
 _MAX_RECEIVER_CELL = 24
-
-_RULE_LABELS = {
-    "no_fix": "No GNSS Fix",
-    "position_offset": "Position Offset",
-    "sudden_speed": "Sudden Speed",
-    "satellite_anomaly": "Low Satellites",
-    "hdop_anomaly": "HDOP High",
-    "time_discontinuity": "Time Discontinuity",
-    "disagreement": "Cross-Receiver Disagreement",
-}
 
 
 @dataclass(frozen=True)
@@ -96,6 +96,14 @@ class LiveRow:
     hdop: Optional[float] = None
     distance_m: Optional[float] = None
     last_update_wall: Optional[float] = None
+    avg_cn0_dbhz: Optional[float] = None
+    """Mean C/N0 (dB-Hz) across this receiver's currently tracked
+    satellites, or None when no tracked-satellite C/N0 is available
+    (gated by `fresh` the same as the other live fields - see
+    LiveController.rows()). Already-averaged by the controller: the
+    dashboard only formats it, it does not compute it - see the
+    architecture note on _render_receiver_table.
+    """
 
 
 @dataclass(frozen=True)
@@ -247,10 +255,6 @@ def _pack_chunks(chunks: list[tuple[str, str]], width: int) -> list[str]:
     return lines
 
 
-def _rule_label(name: str) -> str:
-    return _RULE_LABELS.get(name, name.replace("_", " ").title())
-
-
 def _receiver_label(row: LiveRow) -> str:
     return row.name if row.constellation in (None, "-") else row.constellation
 
@@ -279,6 +283,10 @@ def _hdop_text(value: Optional[float]) -> str:
 
 def _distance_text(value: Optional[float]) -> str:
     return "-" if value is None else f"{value:.1f} m"
+
+
+def _cn0_text(value: Optional[float]) -> str:
+    return "--" if value is None else f"{value:.1f} dB-Hz"
 
 
 def _score_text(row: LiveRow) -> str:
@@ -396,6 +404,7 @@ _TABLE_COLUMNS = [
     _Column("sat", "Sat", "right"),
     _Column("hdop", "HDOP", "right"),
     _Column("dist", "Dist", "right"),
+    _Column("cn0", "Avg C/N0", "right"),
     _Column("age", "Age", "right"),
 ]
 _CORE_COLUMN_COUNT = 5
@@ -415,6 +424,7 @@ def _row_table_values(
         "sat": _int_text(row.num_satellites),
         "hdop": _hdop_text(row.hdop),
         "dist": _distance_text(row.distance_m),
+        "cn0": _cn0_text(row.avg_cn0_dbhz),
         "age": _age_text(row.last_update_wall, now),
     }
 
@@ -516,10 +526,20 @@ def _render_receiver_table(
 def _render_triggered_analysis(
     model: DashboardModel, color: bool, width: int, max_lines: int
 ) -> list[str]:
-    """Rendered only when something is actually flagged (collapses to
+    """The "why does this receiver have this score" breakdown: every
+    receiver with at least one triggered rule gets its own block listing
+    each contributing rule's point value, followed by a Total line
+    matching AnalysisResult.score. Rules that triggered for zero points
+    (a zero-weight indicator, in principle) are skipped - only what
+    actually moved the score is worth a line.
+
+    Rendered only when something is actually flagged (collapses to
     nothing otherwise) and clipped to whatever height remains after the
     header/status/receiver-table sections - it is lower priority than the
-    receiver table but higher than the Event Log.
+    receiver table but higher than the Event Log. Every number here
+    (outcome.points, row.analysis.score) is already computed by the
+    analysis package; this function only formats it - see the module
+    docstring's note on keeping rule evaluation out of the dashboard.
     """
     flagged = [
         row for row in model.rows if row.analysis is not None and row.analysis.triggered_rules
@@ -532,7 +552,14 @@ def _render_triggered_analysis(
     for row in flagged:
         lines.append(_truncate(_receiver_label(row), width))
         for outcome in row.analysis.triggered_rules:  # type: ignore[union-attr]
-            lines.append(_truncate(f"  • {_rule_label(outcome.name)}", width))
+            if outcome.points == 0.0:
+                continue
+            lines.append(
+                _truncate(f"  • {rule_label(outcome.name)}  +{outcome.points:.0f}", width)
+            )
+        lines.append(
+            _truncate(f"  Total: {row.analysis.score:.0f}", width)  # type: ignore[union-attr]
+        )
         lines.append("")
     if lines and lines[-1] == "":
         lines.pop()

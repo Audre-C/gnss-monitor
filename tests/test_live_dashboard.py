@@ -224,6 +224,36 @@ class TestReceiverFields:
         receiver_section = frame.split("Receiver Status", 1)[1]
         assert "-" in receiver_section
 
+    def test_avg_cn0_renders_with_unit(self) -> None:
+        row = LiveRow(
+            name="GPS",
+            constellation="GPS",
+            connection=ConnectionStatus.CONNECTED,
+            result=simple_result(),
+            latitude_deg=25.3,
+            longitude_deg=51.4,
+            avg_cn0_dbhz=39.42,
+        )
+        frame = render([row])
+        header = _table_header(frame)
+        (data_row,) = _table_rows(frame)
+        assert data_row[header.index("Avg C/N0")] == "39.4 dB-Hz"
+
+    def test_missing_avg_cn0_renders_as_double_dash(self) -> None:
+        row = LiveRow(
+            name="GPS",
+            constellation="GPS",
+            connection=ConnectionStatus.CONNECTED,
+            result=simple_result(),
+            latitude_deg=25.3,
+            longitude_deg=51.4,
+            avg_cn0_dbhz=None,
+        )
+        frame = render([row])
+        header = _table_header(frame)
+        (data_row,) = _table_rows(frame)
+        assert data_row[header.index("Avg C/N0")] == "--"
+
 
 class TestTriggeredAnalysisSection:
     def test_section_is_omitted_entirely_when_all_clean(self) -> None:
@@ -275,6 +305,54 @@ class TestTriggeredAnalysisSection:
         assert "HDOP High" in frame
         detail_section = frame.split("Triggered Analysis", 1)[1]
         assert "GLONASS" not in detail_section
+
+    def test_section_shows_points_per_rule_and_a_total(self) -> None:
+        row = LiveRow(
+            name="NEO-6M",
+            constellation="GPS",
+            connection=ConnectionStatus.CONNECTED,
+            result=simple_result(),
+            latitude_deg=25.3,
+            longitude_deg=51.4,
+            analysis=AnalysisResult(
+                "gps",
+                55.0,
+                HealthState.WARNING,
+                (
+                    RuleOutcome("position_offset", True, 20.0, "150 m from expected"),
+                    RuleOutcome("signal_anomaly", True, 30.0, "uniform C/N0"),
+                ),
+            ),
+        )
+        frame = render([row])
+        detail_section = frame.split("Triggered Analysis", 1)[1]
+        assert "Position Offset  +20" in detail_section
+        assert "C/N0 Anomaly  +30" in detail_section
+        assert "Total: 55" in detail_section
+
+    def test_zero_point_rule_is_not_listed(self) -> None:
+        row = LiveRow(
+            name="NEO-6M",
+            constellation="GPS",
+            connection=ConnectionStatus.CONNECTED,
+            result=simple_result(),
+            latitude_deg=25.3,
+            longitude_deg=51.4,
+            analysis=AnalysisResult(
+                "gps",
+                20.0,
+                HealthState.OK,
+                (
+                    RuleOutcome("position_offset", True, 20.0, "150 m from expected"),
+                    RuleOutcome("hdop_anomaly", True, 0.0, "at the boundary"),
+                ),
+            ),
+        )
+        frame = render([row])
+        detail_section = frame.split("Triggered Analysis", 1)[1]
+        assert "Position Offset  +20" in detail_section
+        assert "HDOP High" not in detail_section
+        assert "Total: 20" in detail_section
 
     def test_disconnected_receiver_never_shows_analysis(self) -> None:
         # Even if a stale AnalysisResult were somehow attached, Offline

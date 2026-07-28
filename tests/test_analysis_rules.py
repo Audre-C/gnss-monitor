@@ -332,3 +332,13 @@ class TestSignalAnomaly:
             ReceiverSample(cn0_dbhz=(20, 21, 20, 19, 20)), signal_config()
         )
         assert outcome.triggered is False
+
+
+class TestRuleLabel:
+    def test_known_rules_have_explicit_labels(self) -> None:
+        assert rules.rule_label("position_offset") == "Position Offset"
+        assert rules.rule_label("signal_anomaly") == "C/N0 Anomaly"
+        assert rules.rule_label("disagreement") == "Cross-Receiver Disagreement"
+
+    def test_unknown_rule_falls_back_to_title_case(self) -> None:
+        assert rules.rule_label("some_future_rule") == "Some Future Rule"

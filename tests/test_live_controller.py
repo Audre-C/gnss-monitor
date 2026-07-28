@@ -8,6 +8,7 @@ constellation labelling, and evaluation without requiring serial hardware.
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Optional
 
@@ -30,9 +31,10 @@ from gnss_monitor.config.schema import (
     SpeedScoringConfig,
     TimeScoringConfig,
 )
+from gnss_monitor.geo import haversine_m
 from gnss_monitor.live import LiveController, NullLiveDashboard
 from gnss_monitor.live.worker import ConnectionStatus
-from gnss_monitor.monitor import HealthStatus
+from gnss_monitor.monitor import EvaluationResult, HealthStatus
 from gnss_monitor.sources.base import NMEASource
 from tests.fixtures import dataset_path
 
@@ -585,3 +587,209 @@ def test_event_log_records_connection_and_fix_transitions() -> None:
     )
     messages = [e.message for e in controller._event_log.recent()]  # noqa: SLF001
     assert "GPS recovered" in messages
+
+
+def test_rows_expose_avg_cn0_from_real_gsv_data() -> None:
+    # The corpus fixtures contain real GSV sentences with populated SNR
+    # fields, so draining them through the full threaded path must
+    # populate LiveRow.avg_cn0_dbhz, not just leave it at the default.
+    controller = LiveController(
+        build_config(), dashboard=NullLiveDashboard(), refresh_interval_s=0.05
+    )
+    controller.start()
+    try:
+        controller.wait_until_sources_exhausted(timeout_s=5.0)
+        rows = controller.rows()
+    finally:
+        controller.stop()
+
+    by_name = {r.name: r for r in rows}
+    assert by_name["NEO-6M"].avg_cn0_dbhz is not None
+    assert by_name["NEO-6M"].avg_cn0_dbhz > 0.0
+
+
+def _full_snapshot(
+    receiver_id: str,
+    name: str,
+    port: str = "COM_TEST",
+    connection: ConnectionStatus = ConnectionStatus.CONNECTED,
+    **state_kwargs,
+) -> "ReceiverSnapshot":
+    from gnss_monitor.live.worker import ReceiverSnapshot
+    from gnss_monitor.monitor.receiver_monitor import ReceiverState
+
+    return ReceiverSnapshot(
+        receiver_id=receiver_id,
+        name=name,
+        port=port,
+        connection=connection,
+        state=ReceiverState(**state_kwargs),
+        last_update_wall=time.time(),
+        source_exhausted=False,
+    )
+
+
+class TestStatusChangeDetail:
+    """_evaluate()'s status-changed log/event text must name the actual
+    measurement that explains the transition, not just the two states -
+    see LiveController._describe_status_transition."""
+
+    def test_position_transition_logs_distance(self, caplog) -> None:
+        caplog.set_level(logging.INFO, logger="gnss_monitor.live")
+        controller = LiveController(
+            build_config(radius_m=100.0), dashboard=NullLiveDashboard()
+        )
+        ok_snap = _full_snapshot(
+            "neo6m_1",
+            "NEO-6M",
+            has_fix=True,
+            sentences_seen=1,
+            latitude_deg=25.334373,
+            longitude_deg=51.469359,
+            last_seen_monotonic=time.monotonic(),
+        )
+        controller._evaluate(ok_snap)  # noqa: SLF001 - seeds the baseline, no log yet
+
+        far_lat = 25.334373 + 0.01  # well beyond the 100 m radius
+        expected_distance = haversine_m(
+            25.334373, 51.469359, far_lat, 51.469359
+        )
+        failed_snap = _full_snapshot(
+            "neo6m_1",
+            "NEO-6M",
+            has_fix=True,
+            sentences_seen=2,
+            latitude_deg=far_lat,
+            longitude_deg=51.469359,
+            last_seen_monotonic=time.monotonic(),
+        )
+        caplog.clear()
+        controller._evaluate(failed_snap)  # noqa: SLF001
+
+        assert "status changed: OK -> FAILED" in caplog.text
+        assert f"{expected_distance:.0f} m" in caplog.text
+        assert "0 m ->" in caplog.text  # the OK snapshot's distance was ~0
+
+        messages = [e.message for e in controller._event_log.recent()]  # noqa: SLF001
+        assert any("FAILED" in m and "distance" in m for m in messages)
+
+    def test_no_fix_transition_logs_satellites_and_hdop(self, caplog) -> None:
+        caplog.set_level(logging.INFO, logger="gnss_monitor.live")
+        controller = LiveController(build_config(), dashboard=NullLiveDashboard())
+        ok_snap = _full_snapshot(
+            "neo6m_1",
+            "NEO-6M",
+            has_fix=True,
+            sentences_seen=1,
+            latitude_deg=25.334373,
+            longitude_deg=51.469359,
+            num_satellites=8,
+            hdop=0.9,
+            last_seen_monotonic=time.monotonic(),
+        )
+        controller._evaluate(ok_snap)  # noqa: SLF001
+
+        no_fix_snap = _full_snapshot(
+            "neo6m_1",
+            "NEO-6M",
+            has_fix=False,
+            sentences_seen=2,
+            num_satellites=0,
+            hdop=None,
+            last_seen_monotonic=time.monotonic(),
+        )
+        caplog.clear()
+        controller._evaluate(no_fix_snap)  # noqa: SLF001
+
+        assert "status changed: OK -> NO FIX" in caplog.text
+        assert "fix lost" in caplog.text
+        assert "satellites 8 -> 0" in caplog.text
+        assert "hdop 0.9 -> --" in caplog.text
+
+    def test_timeout_transition_logs_last_sentence_and_port(self, caplog) -> None:
+        caplog.set_level(logging.INFO, logger="gnss_monitor.live")
+        controller = LiveController(build_config(), dashboard=NullLiveDashboard())
+        ok_snap = _full_snapshot(
+            "neo6m_1",
+            "NEO-6M",
+            port="/dev/ttyCH9344USB4",
+            has_fix=True,
+            sentences_seen=1,
+            latitude_deg=25.334373,
+            longitude_deg=51.469359,
+            last_seen_monotonic=time.monotonic(),
+        )
+        controller._evaluate(ok_snap)  # noqa: SLF001
+
+        # build_config()'s baseline has receiver_timeout_s=10.0; 20s of
+        # silence is well past it.
+        stale_snap = _full_snapshot(
+            "neo6m_1",
+            "NEO-6M",
+            port="/dev/ttyCH9344USB4",
+            has_fix=True,
+            sentences_seen=5,
+            latitude_deg=25.334373,
+            longitude_deg=51.469359,
+            last_seen_monotonic=time.monotonic() - 20.0,
+        )
+        caplog.clear()
+        controller._evaluate(stale_snap)  # noqa: SLF001
+
+        assert "status changed: OK -> NO DATA" in caplog.text
+        assert "receiver timeout" in caplog.text
+        assert "last sentence" in caplog.text
+        assert "port /dev/ttyCH9344USB4" in caplog.text
+
+
+class TestAnalysisStateChangeDetail:
+    """_analysis_results()'s state-changed log/event text must include
+    the previous and new score plus which rules are driving it, not just
+    the two HealthState names - see Part 2 of the C/N0/logging work."""
+
+    def test_state_change_logs_scores_and_triggered_rules(self, caplog) -> None:
+        caplog.set_level(logging.INFO, logger="gnss_monitor.live")
+        controller = LiveController(
+            build_config(analysis=analysis_config()), dashboard=NullLiveDashboard()
+        )
+        dummy_result = EvaluationResult(HealthStatus.OK, 0.0, "n/a")
+
+        healthy_snap = _full_snapshot(
+            "neo6m_1",
+            "NEO-6M",
+            has_fix=True,
+            sentences_seen=1,
+            latitude_deg=25.334373,
+            longitude_deg=51.469359,
+            num_satellites=10,
+            hdop=1.0,
+            last_seen_monotonic=time.monotonic(),
+        )
+        controller._analysis_results(  # noqa: SLF001 - seeds the baseline, no log yet
+            [(healthy_snap, dummy_result, True)]
+        )
+
+        # ~1112 m offset: past position.failure_radius_m (500 m), so
+        # position_offset alone scores weight_failure (40) -> Warning.
+        far_snap = _full_snapshot(
+            "neo6m_1",
+            "NEO-6M",
+            has_fix=True,
+            sentences_seen=2,
+            latitude_deg=25.334373 + 0.01,
+            longitude_deg=51.469359,
+            num_satellites=10,
+            hdop=1.0,
+            last_seen_monotonic=time.monotonic(),
+        )
+        caplog.clear()
+        controller._analysis_results(  # noqa: SLF001
+            [(far_snap, dummy_result, True)]
+        )
+
+        assert "analysis state changed: OK (0) -> Warning (40)" in caplog.text
+        assert "triggered:" in caplog.text
+        assert "Position Offset +40" in caplog.text
+
+        messages = [e.message for e in controller._event_log.recent()]  # noqa: SLF001
+        assert any("OK(0)" in m and "Warning(40)" in m for m in messages)

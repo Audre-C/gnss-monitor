@@ -14,6 +14,7 @@ rest of the pipeline is unchanged from replay mode.
 from __future__ import annotations
 
 import logging
+import statistics
 import threading
 import time
 from datetime import datetime
@@ -26,6 +27,7 @@ from gnss_monitor.analysis import (
     HealthState,
     receiver_sample_from_state,
 )
+from gnss_monitor.analysis.rules import RuleOutcome, rule_label
 from gnss_monitor.config.schema import ChannelConfig, RootConfig
 from gnss_monitor.live.dashboard import (
     DashboardModel,
@@ -51,11 +53,58 @@ from gnss_monitor.sources.serial_source import SerialSource
 
 _logger = logging.getLogger("gnss_monitor.live")
 
-_STATUS_EVENT_LABELS = {
-    HealthStatus.OK: "OK",
-    HealthStatus.FAILED: "Failed",
-    HealthStatus.NO_DATA: "No Data",
-}
+
+def _status_display_text(result: EvaluationResult) -> str:
+    """Human status label distinguishing "no fix" from "out of range".
+
+    Both are HealthStatus.FAILED - the enum itself doesn't carry this
+    distinction - so this splits on the same already-known field
+    (distance_m being None) that monitor/dashboard.py's TerminalDashboard
+    ._status_cell already uses for exactly the same purpose. Not a new
+    health state, just a presentation label for log/event text.
+    """
+    if result.status is HealthStatus.OK:
+        return "OK"
+    if result.status is HealthStatus.NO_DATA:
+        return "NO DATA"
+    if result.distance_m is None:
+        return "NO FIX"
+    return "FAILED"
+
+
+def _fmt_distance(value: Optional[float]) -> str:
+    return "--" if value is None else f"{value:.0f} m"
+
+
+def _fmt_satellites(value: Optional[int]) -> str:
+    return "--" if value is None else str(value)
+
+
+def _fmt_hdop(value: Optional[float]) -> str:
+    return "--" if value is None else f"{value:.1f}"
+
+
+def _fmt_age(age_s: Optional[float]) -> str:
+    return "never" if age_s is None else f"{age_s:.1f}s ago"
+
+
+def _format_triggered_rules(outcomes: tuple[RuleOutcome, ...]) -> str:
+    """One-line "why the score is what it is" breakdown for log text.
+
+    Reuses each rule's own outcome.reason rather than re-deriving the
+    same measurements a second time - the analysis package already
+    computed and phrased them; duplicating that here would be exactly
+    the kind of analysis-logic-in-the-wrong-layer this project has
+    deliberately avoided elsewhere (see live/dashboard.py's module
+    docstring). Only points > 0 rules are listed, matching the Triggered
+    Analysis dashboard section.
+    """
+    parts = [
+        f"{rule_label(o.name)} +{o.points:.0f} ({o.reason})"
+        for o in outcomes
+        if o.points > 0.0
+    ]
+    return "; ".join(parts) if parts else "none"
 
 
 class LiveController:
@@ -88,8 +137,16 @@ class LiveController:
         self._workers: list[ReceiverWorker] = []
         self._evaluators: dict[str, PositionEvaluator] = {}
         self._constellations: dict[str, str] = {}
-        self._last_health: dict[str, HealthStatus] = {}
+        # Previous EvaluationResult per receiver, plus the satellite/HDOP
+        # readings alongside it (not part of EvaluationResult itself) -
+        # together these are what let a status-changed log line say what
+        # actually changed (distance, satellite count, HDOP) instead of
+        # just which two states it moved between. See _evaluate().
+        self._last_evaluation: dict[str, EvaluationResult] = {}
+        self._last_satellites: dict[str, Optional[int]] = {}
+        self._last_hdop: dict[str, Optional[float]] = {}
         self._last_analysis_state: dict[str, HealthState] = {}
+        self._last_analysis_score: dict[str, float] = {}
         self._last_connection: dict[str, ConnectionStatus] = {}
         self._last_has_fix: dict[str, bool] = {}
 
@@ -218,24 +275,66 @@ class LiveController:
             self._event_log.record(f"{label} {message}")
         self._last_has_fix[snap.receiver_id] = current
 
+    def _describe_status_transition(
+        self,
+        snap: ReceiverSnapshot,
+        previous: EvaluationResult,
+        result: EvaluationResult,
+    ) -> str:
+        """The measurement that explains a Simple Mode status change.
+
+        Which measurement is relevant depends on what actually changed:
+        a receiver that stopped reporting entirely needs "how long ago
+        and on which port", one that lost its fix needs "how many
+        satellites/what HDOP", and one whose fix moved needs "how far".
+        Picking the right one is what turns "FAILED -> OK" into
+        something a person reading the log tomorrow can act on without
+        having to go re-derive it from raw state.
+        """
+        if result.status is HealthStatus.NO_DATA:
+            age_s = (
+                None
+                if snap.state.last_seen_monotonic is None
+                else time.monotonic() - snap.state.last_seen_monotonic
+            )
+            return (
+                f"receiver timeout; last sentence {_fmt_age(age_s)}; "
+                f"port {snap.port}"
+            )
+        if result.status is HealthStatus.FAILED and result.distance_m is None:
+            prev_sat = self._last_satellites.get(snap.receiver_id)
+            prev_hdop = self._last_hdop.get(snap.receiver_id)
+            return (
+                f"fix lost; satellites {_fmt_satellites(prev_sat)} -> "
+                f"{_fmt_satellites(snap.state.num_satellites)}; "
+                f"hdop {_fmt_hdop(prev_hdop)} -> {_fmt_hdop(snap.state.hdop)}"
+            )
+        return (
+            f"distance {_fmt_distance(previous.distance_m)} -> "
+            f"{_fmt_distance(result.distance_m)}"
+        )
+
     def _evaluate(self, snap: ReceiverSnapshot) -> EvaluationResult:
         result = self._evaluators[snap.receiver_id].evaluate(snap.state)
-        previous = self._last_health.get(snap.receiver_id)
-        if previous is not None and previous is not result.status:
+        previous = self._last_evaluation.get(snap.receiver_id)
+        if previous is not None and previous.status is not result.status:
+            detail = self._describe_status_transition(snap, previous, result)
             _logger.info(
-                "receiver '%s' (%s) status changed: %s -> %s (%s)",
+                "receiver '%s' (%s) status changed: %s -> %s (%s); %s",
                 snap.receiver_id,
                 snap.name,
-                previous.value,
-                result.status.value,
+                _status_display_text(previous),
+                _status_display_text(result),
                 result.reason,
+                detail,
             )
             label = self._event_label(snap.receiver_id, snap.name)
-            status_text = _STATUS_EVENT_LABELS.get(
-                result.status, result.status.value
+            self._event_log.record(
+                f"{label} {_status_display_text(result)}: {detail}"
             )
-            self._event_log.record(f"{label} {status_text}")
-        self._last_health[snap.receiver_id] = result.status
+        self._last_evaluation[snap.receiver_id] = result
+        self._last_satellites[snap.receiver_id] = snap.state.num_satellites
+        self._last_hdop[snap.receiver_id] = snap.state.hdop
         return result
 
     def _evaluations(
@@ -291,26 +390,50 @@ class LiveController:
         }
         names = {snap.receiver_id: snap.name for snap, _r, _f in evaluations}
         for receiver_id, result in results.items():
-            previous = self._last_analysis_state.get(receiver_id)
-            if previous is not None and previous is not result.state:
+            previous_state = self._last_analysis_state.get(receiver_id)
+            previous_score = self._last_analysis_score.get(receiver_id)
+            if previous_state is not None and previous_state is not result.state:
+                rules_text = _format_triggered_rules(result.triggered_rules)
                 _logger.info(
-                    "receiver '%s' analysis state changed: %s -> %s "
-                    "(score %.0f)",
+                    "receiver '%s' analysis state changed: %s (%.0f) -> "
+                    "%s (%.0f); triggered: %s",
                     receiver_id,
-                    previous.value,
+                    previous_state.value,
+                    previous_score,
                     result.state.value,
                     result.score,
+                    rules_text,
                 )
                 label = self._event_label(
                     receiver_id, names.get(receiver_id, receiver_id)
                 )
-                self._event_log.record(f"{label} {result.state.value}")
+                self._event_log.record(
+                    f"{label} {previous_state.value}({previous_score:.0f}) "
+                    f"-> {result.state.value}({result.score:.0f})"
+                )
             self._last_analysis_state[receiver_id] = result.state
+            self._last_analysis_score[receiver_id] = result.score
         return results
+
+    @staticmethod
+    def _average_cn0_dbhz(
+        snap: ReceiverSnapshot, now_mono: float
+    ) -> Optional[float]:
+        """Mean C/N0 across currently tracked satellites, for display only.
+
+        A plain arithmetic mean of already-captured values - not an
+        anomaly judgement (that's signal_anomaly, in the analysis
+        package) - so computing it here rather than in the dashboard
+        does not put rule-evaluation logic in the wrong layer; see the
+        architecture note in live/dashboard.py.
+        """
+        values = snap.state.tracked_cn0_dbhz(now_mono)
+        return statistics.mean(values) if values else None
 
     def rows(self) -> list[LiveRow]:
         evaluations = self._evaluations()
         analysis_results = self._analysis_results(evaluations)
+        now_mono = time.monotonic()
         rows: list[LiveRow] = []
         for snap, result, fresh in evaluations:
             rows.append(
@@ -338,6 +461,9 @@ class LiveController:
                     # position/score which would misrepresent stale data
                     # as current if shown the same way.
                     last_update_wall=snap.last_update_wall,
+                    avg_cn0_dbhz=(
+                        self._average_cn0_dbhz(snap, now_mono) if fresh else None
+                    ),
                 )
             )
         return rows

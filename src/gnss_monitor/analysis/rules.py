@@ -61,6 +61,35 @@ class RuleOutcome:
     reason: str
 
 
+RULE_LABELS: dict[str, str] = {
+    "no_fix": "No GNSS Fix",
+    "position_offset": "Position Offset",
+    "sudden_speed": "Sudden Speed",
+    "satellite_anomaly": "Low Satellites",
+    "hdop_anomaly": "HDOP High",
+    "time_discontinuity": "Time Discontinuity",
+    "disagreement": "Cross-Receiver Disagreement",
+    "signal_anomaly": "C/N0 Anomaly",
+}
+"""Human-readable label for each rule's internal name.
+
+The single owner of this mapping: both the dashboard (rendering) and
+LiveController (log text) need it, and this is the rules themselves'
+own descriptive metadata, not "rule evaluation" or "rendering" logic -
+see rule_label() below.
+"""
+
+
+def rule_label(name: str) -> str:
+    """Human-readable label for a rule name, e.g. for display or log text.
+
+    Falls back to a title-cased version of the raw name for any rule not
+    in RULE_LABELS, so a future rule added without updating this map
+    still displays something reasonable rather than crashing.
+    """
+    return RULE_LABELS.get(name, name.replace("_", " ").title())
+
+
 def _ramp(value: float, low: float, high: float, weight: float) -> float:
     """Linear ramp: 0 at/below `low`, `weight` at/above `high`."""
     if value <= low:
