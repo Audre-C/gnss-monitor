@@ -29,6 +29,7 @@ from gnss_monitor.analysis import (
 )
 from gnss_monitor.analysis.rules import RuleOutcome, rule_label
 from gnss_monitor.config.schema import ChannelConfig, RootConfig
+from gnss_monitor.data_logging import DataLogger
 from gnss_monitor.live.dashboard import (
     DashboardModel,
     LiveDashboard,
@@ -161,12 +162,20 @@ class LiveController:
                 ),
             )
 
+        # Optional raw/parsed/snapshot GNSS data archive - see
+        # gnss_monitor.data_logging. A pure observer: it satisfies
+        # ReceiverMonitor's DataSink protocol structurally (no import
+        # cycle), and is fully inert when config.data_logging is absent
+        # or disabled, so this line changes nothing about existing runs.
+        self._data_logger = DataLogger(config.data_logging)
+
         for channel in config.channels:
             source = self._source_factory(channel)
             monitor = ReceiverMonitor(
                 receiver_id=channel.id,
                 display_name=channel.display_name,
                 source=source,
+                sink=self._data_logger,
             )
             worker = ReceiverWorker(
                 monitor=monitor,
@@ -222,6 +231,7 @@ class LiveController:
         self._stop.set()
         for worker in self._workers:
             worker.stop()
+        self._data_logger.close()
 
     def request_stop(self) -> None:
         """Ask the run loop to exit; safe to call from a signal handler.
@@ -436,6 +446,8 @@ class LiveController:
         now_mono = time.monotonic()
         rows: list[LiveRow] = []
         for snap, result, fresh in evaluations:
+            analysis = analysis_results.get(snap.receiver_id)
+            avg_cn0 = self._average_cn0_dbhz(snap, now_mono) if fresh else None
             rows.append(
                 LiveRow(
                     name=snap.name,
@@ -448,7 +460,7 @@ class LiveController:
                     longitude_deg=(
                         snap.state.longitude_deg if fresh else None
                     ),
-                    analysis=analysis_results.get(snap.receiver_id),
+                    analysis=analysis,
                     has_fix=snap.state.has_fix if fresh else None,
                     num_satellites=(
                         snap.state.num_satellites if fresh else None
@@ -461,12 +473,56 @@ class LiveController:
                     # position/score which would misrepresent stale data
                     # as current if shown the same way.
                     last_update_wall=snap.last_update_wall,
-                    avg_cn0_dbhz=(
-                        self._average_cn0_dbhz(snap, now_mono) if fresh else None
-                    ),
+                    avg_cn0_dbhz=avg_cn0,
                 )
             )
+            self._log_data(snap, result, fresh, analysis, avg_cn0)
         return rows
+
+    def _log_data(
+        self,
+        snap: ReceiverSnapshot,
+        result: EvaluationResult,
+        fresh: bool,
+        analysis: Optional[AnalysisResult],
+        avg_cn0: Optional[float],
+    ) -> None:
+        """Feed the optional data-logging subsystem for one receiver.
+
+        A pure observer call: DataLogger is fully inert when data
+        logging is disabled (the common case), and nothing here feeds
+        back into result/analysis/rows - see gnss_monitor.data_logging's
+        module docstring.
+        """
+        self._data_logger.update_receiver_context(
+            snap.receiver_id,
+            avg_cn0_dbhz=avg_cn0,
+            analysis_score=analysis.score if analysis is not None else None,
+            analysis_state=(
+                analysis.state.value if analysis is not None else None
+            ),
+        )
+        self._data_logger.record_snapshot(
+            snap.receiver_id,
+            name=snap.name,
+            constellation=self._constellations.get(snap.receiver_id, "-"),
+            health=_status_display_text(result),
+            analysis_state=analysis.state.value if analysis is not None else None,
+            score=analysis.score if analysis is not None else None,
+            latitude_deg=snap.state.latitude_deg if fresh else None,
+            longitude_deg=snap.state.longitude_deg if fresh else None,
+            distance_from_expected_m=result.distance_m if fresh else None,
+            speed_mps=snap.state.speed_mps if fresh else None,
+            has_fix=snap.state.has_fix if fresh else None,
+            hdop=snap.state.hdop if fresh else None,
+            num_satellites=snap.state.num_satellites if fresh else None,
+            avg_cn0_dbhz=avg_cn0,
+            triggered_rules=(
+                _format_triggered_rules(analysis.triggered_rules)
+                if analysis is not None
+                else ""
+            ),
+        )
 
     def results(self) -> dict[str, EvaluationResult]:
         return {

@@ -290,3 +290,66 @@ class TestConstellation:
         # No constellation set -> display helper yields '-'.
         assert config.channels[0].constellation is None
         assert config.channels[0].display_constellation == "-"
+
+
+DATA_LOGGING_SECTION = """
+data_logging:
+  enabled: true
+  raw_nmea:
+    enabled: true
+  parsed:
+    enabled: true
+  snapshot:
+    enabled: true
+    interval_s: 2.0
+  directory: logs/data
+  rotate_daily: true
+"""
+
+
+class TestDataLoggingConfig:
+    def test_absent_by_default(self, tmp_path: Path) -> None:
+        config = load_config(write_config(tmp_path, VALID_CONFIG))
+        assert config.data_logging is None
+
+    def test_loads_when_present(self, tmp_path: Path) -> None:
+        text = VALID_CONFIG + DATA_LOGGING_SECTION
+        config = load_config(write_config(tmp_path, text))
+        assert config.data_logging is not None
+        assert config.data_logging.enabled is True
+        assert config.data_logging.raw_nmea.enabled is True
+        assert config.data_logging.parsed.enabled is True
+        assert config.data_logging.snapshot.enabled is True
+        assert config.data_logging.snapshot.interval_s == 2.0
+        assert config.data_logging.directory == Path("logs/data")
+        assert config.data_logging.rotate_daily is True
+
+    def test_every_sub_logger_disabled_by_default(self, tmp_path: Path) -> None:
+        text = VALID_CONFIG + "\ndata_logging:\n  enabled: true\n"
+        config = load_config(write_config(tmp_path, text))
+        assert config.data_logging.enabled is True
+        assert config.data_logging.raw_nmea.enabled is False
+        assert config.data_logging.parsed.enabled is False
+        assert config.data_logging.snapshot.enabled is False
+        assert config.data_logging.snapshot.interval_s == 1.0
+        assert config.data_logging.directory == Path("logs/data")
+        assert config.data_logging.rotate_daily is True
+
+    def test_master_switch_defaults_to_false(self, tmp_path: Path) -> None:
+        text = VALID_CONFIG + "\ndata_logging: {}\n"
+        config = load_config(write_config(tmp_path, text))
+        assert config.data_logging.enabled is False
+
+    def test_negative_interval_rejected(self, tmp_path: Path) -> None:
+        text = VALID_CONFIG + DATA_LOGGING_SECTION.replace(
+            "interval_s: 2.0", "interval_s: -1.0"
+        )
+        with pytest.raises(ConfigError):
+            load_config(write_config(tmp_path, text))
+
+    def test_unknown_key_rejected(self, tmp_path: Path) -> None:
+        text = VALID_CONFIG + DATA_LOGGING_SECTION.replace(
+            "rotate_daily: true", "rotate_daily: true\n  bogus: 1"
+        )
+        with pytest.raises(ConfigError):
+            load_config(write_config(tmp_path, text))

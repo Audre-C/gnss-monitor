@@ -135,3 +135,22 @@ analysis:
     warning: 30
     potential_spoofing: 60
     spoofing: 90
+
+# Optional GNSS data archive (gnss_monitor.data_logging) - completely
+# separate from app.log and the Event Log. Disabled by default; flip
+# `enabled: true` plus whichever of the three loggers below you need.
+# Files land under `directory`, one YYYY-MM-DD subdirectory per day
+# (rotate_daily: true) so nothing grows unbounded over a multi-week
+# unattended run. Plain files only - see gnss_monitor.data_logging's
+# module docstring for the full design rationale.
+data_logging:
+  enabled: false
+  raw_nmea:
+    enabled: false
+  parsed:
+    enabled: false
+  snapshot:
+    enabled: false
+    interval_s: 1.0
+  directory: logs/data
+  rotate_daily: true

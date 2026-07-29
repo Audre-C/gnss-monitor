@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Protocol
 
 from gnss_monitor.framing import Framer
 from gnss_monitor.model import (
@@ -20,8 +20,53 @@ from gnss_monitor.model import (
     RMCMessage,
     SatelliteInfo,
 )
+from gnss_monitor.model.sentence import NmeaSentence
 from gnss_monitor.parsing import NmeaParser
 from gnss_monitor.sources.base import NMEASource
+
+
+class DataSink(Protocol):
+    """Narrow interface for an optional passive observer of every sentence.
+
+    Defined here (the acquisition layer) rather than in the data-logging
+    package itself, so this module never has to import anything from
+    data_logging: any object with matching methods satisfies this
+    Protocol structurally, and gnss_monitor.data_logging.DataLogger is
+    simply one such object, wired in by LiveController. A sink must
+    never raise (ReceiverMonitor does not guard these calls) and must
+    return immediately - it observes, it does not influence acquisition.
+    """
+
+    def on_raw(self, receiver_id: str, t_wall: Optional[float], raw: str) -> None: ...
+
+    def on_parsed(
+        self,
+        receiver_id: str,
+        t_wall: Optional[float],
+        sentence: NmeaSentence,
+        message: object,
+    ) -> None: ...
+
+
+class _NullDataSink:
+    """Default sink: both calls are no-ops, so an unconfigured
+    ReceiverMonitor pays only the cost of two trivial method calls per
+    sentence and writes nothing anywhere."""
+
+    def on_raw(self, receiver_id: str, t_wall: Optional[float], raw: str) -> None:
+        return None
+
+    def on_parsed(
+        self,
+        receiver_id: str,
+        t_wall: Optional[float],
+        sentence: NmeaSentence,
+        message: object,
+    ) -> None:
+        return None
+
+
+_NULL_DATA_SINK = _NullDataSink()
 
 _CN0_TRACK_TTL_S = 10.0
 """How long a tracked satellite's C/N0 reading stays "current" after its
@@ -124,12 +169,14 @@ class ReceiverMonitor:
         source: NMEASource,
         framer: Optional[Framer] = None,
         parser: Optional[NmeaParser] = None,
+        sink: Optional[DataSink] = None,
     ) -> None:
         self.receiver_id = receiver_id
         self.display_name = display_name
         self._source = source
         self._framer = framer or Framer()
         self._parser = parser or NmeaParser()
+        self._sink = sink or _NULL_DATA_SINK
         self.state = ReceiverState()
 
     @property
@@ -164,7 +211,10 @@ class ReceiverMonitor:
         self.state.last_seen_monotonic = sentence.t_rx_mono
         if sentence.checksum_ok:
             self.state.valid_checksums += 1
-        self._apply(self._parser.parse(sentence))
+        self._sink.on_raw(self.receiver_id, sentence.t_rx_wall, sentence.raw)
+        message = self._parser.parse(sentence)
+        self._sink.on_parsed(self.receiver_id, sentence.t_rx_wall, sentence, message)
+        self._apply(message)
 
     def _apply(self, message: object) -> None:
         """Update state from a parsed message (latest valid wins)."""

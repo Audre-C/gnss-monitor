@@ -472,6 +472,84 @@ class AnalysisConfig(StrictModel):
 
 
 # ---------------------------------------------------------------------------
+# Data logging (optional raw/parsed/snapshot archive - see gnss_monitor.
+# data_logging). Entirely separate from app.log and the on-screen Event
+# Log: this is a plain-file archive of the measurements themselves, for
+# offline threshold tuning, replay, and post-event analysis. Disabled by
+# default at every level, and the whole `data_logging:` section is
+# optional, so configs written before this existed keep loading and
+# running identically.
+# ---------------------------------------------------------------------------
+
+
+class RawNmeaLoggerConfig(StrictModel):
+    """Archives every received NMEA sentence verbatim, one file per
+    receiver."""
+
+    enabled: bool = Field(
+        default=False,
+        description="Write every raw NMEA sentence exactly as received.",
+    )
+
+
+class ParsedLoggerConfig(StrictModel):
+    """Logs the parsed interpretation of every sentence as a CSV row."""
+
+    enabled: bool = Field(
+        default=False,
+        description="Write a CSV row for every parsed NMEA sentence.",
+    )
+
+
+class SnapshotLoggerConfig(StrictModel):
+    """Periodically logs one row per receiver combining acquisition and
+    analysis state - the dataset most useful for offline tooling
+    (Excel/MATLAB/pandas), since score and measurements are already
+    joined on the same timestamp."""
+
+    enabled: bool = Field(
+        default=False,
+        description="Write one row per receiver on a fixed interval.",
+    )
+    interval_s: float = Field(
+        default=1.0,
+        gt=0.0,
+        description="Seconds between snapshot rows for a given receiver.",
+    )
+
+
+class DataLoggingConfig(StrictModel):
+    """Optional GNSS data-logging subsystem configuration.
+
+    `enabled` is the master switch: everything below is inert unless it
+    is True. Each of the three loggers is independently toggled, so a
+    deployment can enable only the ones it needs (e.g. snapshot only, to
+    keep disk usage low on a Pi's SD card).
+    """
+
+    enabled: bool = Field(
+        default=False,
+        description="Master switch for the data-logging subsystem. All "
+        "three loggers below stay off regardless of their own `enabled` "
+        "flag while this is False.",
+    )
+    raw_nmea: RawNmeaLoggerConfig = Field(default_factory=RawNmeaLoggerConfig)
+    parsed: ParsedLoggerConfig = Field(default_factory=ParsedLoggerConfig)
+    snapshot: SnapshotLoggerConfig = Field(default_factory=SnapshotLoggerConfig)
+    directory: Path = Field(
+        default=Path("logs/data"),
+        description="Root directory for data logs. Subdivided by day "
+        "when rotate_daily is True.",
+    )
+    rotate_daily: bool = Field(
+        default=True,
+        description="Start a new set of files each day, under a "
+        "YYYY-MM-DD subdirectory of `directory`, so no single file grows "
+        "unbounded over a multi-week unattended run.",
+    )
+
+
+# ---------------------------------------------------------------------------
 # Top-level sections
 # ---------------------------------------------------------------------------
 
@@ -507,6 +585,13 @@ class RootConfig(StrictModel):
         description="Version 2 scoring-engine thresholds. Omit this "
         "section entirely to run without the scoring engine (Simple "
         "Mode behaviour only) - existing configs are unaffected.",
+    )
+    data_logging: Optional[DataLoggingConfig] = Field(
+        default=None,
+        description="Optional raw/parsed/snapshot GNSS data archive "
+        "(gnss_monitor.data_logging). Omit this section entirely, or "
+        "leave enabled: false, to run with no data logging at all - "
+        "existing configs are unaffected. Live Mode only.",
     )
 
     @model_validator(mode="after")

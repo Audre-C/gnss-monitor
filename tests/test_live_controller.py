@@ -8,8 +8,10 @@ constellation labelling, and evaluation without requiring serial hardware.
 
 from __future__ import annotations
 
+import csv
 import logging
 import time
+from pathlib import Path
 from typing import Optional
 
 from gnss_monitor.analysis.score import HealthState
@@ -17,17 +19,21 @@ from gnss_monitor.config.schema import (
     AnalysisConfig,
     AppSection,
     ChannelConfig,
+    DataLoggingConfig,
     DisagreementScoringConfig,
     ExpectedBaseline,
     FileSourceConfig,
     HdopScoringConfig,
     NoFixScoringConfig,
     OverallThresholdsConfig,
+    ParsedLoggerConfig,
     PositionScoringConfig,
+    RawNmeaLoggerConfig,
     RootConfig,
     SatellitesScoringConfig,
     SerialSourceConfig,
     SiteSection,
+    SnapshotLoggerConfig,
     SpeedScoringConfig,
     TimeScoringConfig,
 )
@@ -66,6 +72,7 @@ def analysis_config() -> AnalysisConfig:
 def build_config(
     radius_m: float = 100.0,
     analysis: Optional[AnalysisConfig] = None,
+    data_logging: Optional[DataLoggingConfig] = None,
 ) -> RootConfig:
     baseline = ExpectedBaseline(
         latitude_deg=25.334373,
@@ -112,6 +119,7 @@ def build_config(
         site=SiteSection(name="Test Site", expected=baseline),
         channels=channels,
         analysis=analysis,
+        data_logging=data_logging,
     )
 
 
@@ -793,3 +801,74 @@ class TestAnalysisStateChangeDetail:
 
         messages = [e.message for e in controller._event_log.recent()]  # noqa: SLF001
         assert any("OK(0)" in m and "Warning(40)" in m for m in messages)
+
+
+class TestDataLoggingIntegration:
+    """End-to-end: LiveController wired to a real DataLogger over the real
+    fixture corpus. Proves the whole observer chain (ReceiverMonitor's
+    sink calls -> DataLogger's queue/thread -> the writers) produces real
+    files with real content, and that leaving data_logging unset changes
+    nothing about a run."""
+
+    def test_disabled_by_default_creates_no_data_directory(
+        self, tmp_path: Path
+    ) -> None:
+        controller = LiveController(
+            build_config(), dashboard=NullLiveDashboard(), refresh_interval_s=0.05,
+        )
+        assert controller._data_logger.enabled is False  # noqa: SLF001
+        controller.start()
+        try:
+            controller.wait_until_sources_exhausted(timeout_s=5.0)
+            controller.rows()
+        finally:
+            controller.stop()
+        assert not (tmp_path / "data").exists()
+
+    def test_enabled_writes_raw_parsed_and_snapshot_files(
+        self, tmp_path: Path
+    ) -> None:
+        data_dir = tmp_path / "data"
+        config = build_config(
+            data_logging=DataLoggingConfig(
+                enabled=True,
+                raw_nmea=RawNmeaLoggerConfig(enabled=True),
+                parsed=ParsedLoggerConfig(enabled=True),
+                snapshot=SnapshotLoggerConfig(enabled=True, interval_s=0.01),
+                directory=data_dir,
+            )
+        )
+        controller = LiveController(
+            config, dashboard=NullLiveDashboard(), refresh_interval_s=0.05,
+        )
+        controller.start()
+        try:
+            controller.wait_until_sources_exhausted(timeout_s=5.0)
+            controller.rows()  # drives at least one parsed/snapshot tick
+        finally:
+            controller.stop()  # flushes and joins the data-logger thread
+
+        raw_files = list(data_dir.rglob("neo6m_1.nmea"))
+        assert len(raw_files) == 1
+        raw_lines = raw_files[0].read_text(encoding="utf-8").strip().splitlines()
+        assert len(raw_lines) > 0
+        assert raw_lines[0].split(",", 1)[1].startswith("$")
+
+        parsed_files = list(data_dir.rglob("parsed.csv"))
+        assert len(parsed_files) == 1
+        with open(parsed_files[0], newline="", encoding="utf-8") as handle:
+            parsed_rows = list(csv.reader(handle))
+        assert parsed_rows[0][:3] == ["timestamp", "receiver", "sentence"]
+        assert len(parsed_rows) > 1
+        assert any(row[1] == "neo6m_1" for row in parsed_rows[1:])
+
+        snapshot_files = list(data_dir.rglob("snapshot.csv"))
+        assert len(snapshot_files) == 1
+        with open(snapshot_files[0], newline="", encoding="utf-8") as handle:
+            snapshot_rows = list(csv.reader(handle))
+        assert snapshot_rows[0][:4] == [
+            "timestamp", "receiver", "constellation", "health",
+        ]
+        assert len(snapshot_rows) > 1
+        names = {row[1] for row in snapshot_rows[1:]}
+        assert "NEO-6M" in names

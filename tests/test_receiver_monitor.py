@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import time
+from typing import Optional
 
 import pytest
 
 from gnss_monitor.model import SatelliteInfo
+from gnss_monitor.model.sentence import NmeaSentence
 from gnss_monitor.monitor import ReceiverMonitor
 from gnss_monitor.monitor.receiver_monitor import _CN0_TRACK_TTL_S, ReceiverState
 from gnss_monitor.sources import FileReplaySource
@@ -116,3 +118,70 @@ class TestGsvTrackedCn0:
             t_rx_mono=100.0 + _CN0_TRACK_TTL_S + 1.0,
         )
         assert state.tracked_cn0_dbhz(100.0 + _CN0_TRACK_TTL_S + 1.0) == (40,)
+
+
+class _RecordingSink:
+    """Test double for monitor.receiver_monitor.DataSink: records every
+    call it receives without influencing anything, proving ReceiverMonitor
+    treats the sink purely as a passive observer."""
+
+    def __init__(self) -> None:
+        self.raw_calls: list[tuple] = []
+        self.parsed_calls: list[tuple] = []
+
+    def on_raw(self, receiver_id: str, t_wall: Optional[float], raw: str) -> None:
+        self.raw_calls.append((receiver_id, t_wall, raw))
+
+    def on_parsed(
+        self,
+        receiver_id: str,
+        t_wall: Optional[float],
+        sentence: NmeaSentence,
+        message: object,
+    ) -> None:
+        self.parsed_calls.append((receiver_id, t_wall, sentence, message))
+
+
+class TestDataSinkObservation:
+    def test_sink_observes_every_line_without_affecting_state(self) -> None:
+        sink = _RecordingSink()
+        m = ReceiverMonitor(
+            "r1", "R1", FileReplaySource("r1", dataset_path("neo6m", "normal")),
+            sink=sink,
+        )
+        line = "$GPGGA,123122.00,2520.06239,N,05128.16155,E,1,08,0.9,10.0,M,,,,*4F"
+        m._process_line(line)  # noqa: SLF001 - exercising line handling directly
+
+        assert len(sink.raw_calls) == 1
+        receiver_id, t_wall, raw = sink.raw_calls[0]
+        assert receiver_id == "r1"
+        assert raw == line
+        assert t_wall is not None
+
+        assert len(sink.parsed_calls) == 1
+        receiver_id, t_wall, sentence, message = sink.parsed_calls[0]
+        assert receiver_id == "r1"
+        assert sentence.sentence_type == "GGA"
+        assert message is not None
+
+        # State updates are identical to the no-sink path: the sink is
+        # a pure observer, not a participant.
+        assert m.state.has_fix is True
+        assert m.state.latitude_deg is not None
+
+    def test_no_sink_behaves_identically_to_a_sink(self) -> None:
+        line = "$GPGGA,123122.00,2520.06239,N,05128.16155,E,1,08,0.9,10.0,M,,,,*4F"
+        without_sink = ReceiverMonitor(
+            "r1", "R1", FileReplaySource("r1", dataset_path("neo6m", "normal"))
+        )
+        with_sink = ReceiverMonitor(
+            "r1", "R1", FileReplaySource("r1", dataset_path("neo6m", "normal")),
+            sink=_RecordingSink(),
+        )
+        without_sink._process_line(line)  # noqa: SLF001
+        with_sink._process_line(line)  # noqa: SLF001
+
+        assert without_sink.state.has_fix == with_sink.state.has_fix
+        assert without_sink.state.latitude_deg == with_sink.state.latitude_deg
+        assert without_sink.state.longitude_deg == with_sink.state.longitude_deg
+        assert without_sink.state.sentences_seen == with_sink.state.sentences_seen
