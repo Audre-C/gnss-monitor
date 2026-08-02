@@ -185,3 +185,84 @@ class TestDataSinkObservation:
         assert without_sink.state.latitude_deg == with_sink.state.latitude_deg
         assert without_sink.state.longitude_deg == with_sink.state.longitude_deg
         assert without_sink.state.sentences_seen == with_sink.state.sentences_seen
+
+
+class TestFixLossIsNotLatched:
+    """Regression tests: a receiver that reports losing its fix must have
+    has_fix (and the position it gates) reflect that immediately, not hold
+    a stale True from whenever the fix was last valid - see _apply()."""
+
+    _VALID_GGA = (
+        "$GPGGA,123122.00,2520.06239,N,05128.16155,E,1,08,0.9,10.0,M,,,,*0D"
+    )
+    _NO_FIX_GGA = (
+        "$GPGGA,123123.00,,,,,0,00,99.99,,M,,,,*2B"
+    )
+    _VALID_RMC = (
+        "$GNRMC,113954.00,A,2520.06189,N,05128.16076,E,0.011,,200726,,,A,V*15"
+    )
+    _VOID_RMC = "$GPRMC,,V,,,,,,,,,,N*53"
+
+    def _monitor(self) -> ReceiverMonitor:
+        return ReceiverMonitor(
+            "r1", "R1", FileReplaySource("r1", dataset_path("neo6m", "normal"))
+        )
+
+    def test_gga_fix_loss_clears_has_fix_and_position(self) -> None:
+        m = self._monitor()
+        m._process_line(self._VALID_GGA)  # noqa: SLF001
+        assert m.state.has_fix is True
+        assert m.state.latitude_deg is not None
+
+        m._process_line(self._NO_FIX_GGA)  # noqa: SLF001
+        assert m.state.has_fix is False
+        assert m.state.latitude_deg is None
+        assert m.state.longitude_deg is None
+        assert m.state.altitude_m is None
+
+    def test_gga_fix_loss_still_updates_satellites_and_hdop(self) -> None:
+        # satellite_anomaly/hdop_anomaly do not gate on has_fix - they
+        # must see the *current* (degraded) reading, not a frozen
+        # pre-loss value, or the analysis engine loses exactly the
+        # signal that would explain why the fix was lost.
+        m = self._monitor()
+        m._process_line(self._VALID_GGA)  # noqa: SLF001
+        assert m.state.num_satellites == 8
+        assert m.state.hdop == pytest.approx(0.9)
+
+        m._process_line(self._NO_FIX_GGA)  # noqa: SLF001
+        assert m.state.num_satellites == 0
+        assert m.state.hdop == pytest.approx(99.99)
+
+    def test_rmc_void_clears_has_fix_position_and_speed(self) -> None:
+        m = self._monitor()
+        m._process_line(self._VALID_RMC)  # noqa: SLF001
+        assert m.state.has_fix is True
+        assert m.state.latitude_deg is not None
+
+        m._process_line(self._VOID_RMC)  # noqa: SLF001
+        assert m.state.has_fix is False
+        assert m.state.latitude_deg is None
+        assert m.state.longitude_deg is None
+        assert m.state.speed_mps is None
+
+    def test_fix_reacquisition_after_loss_sets_has_fix_true_again(self) -> None:
+        m = self._monitor()
+        m._process_line(self._VALID_GGA)  # noqa: SLF001
+        m._process_line(self._NO_FIX_GGA)  # noqa: SLF001
+        assert m.state.has_fix is False
+
+        m._process_line(self._VALID_GGA)  # noqa: SLF001
+        assert m.state.has_fix is True
+        assert m.state.latitude_deg is not None
+
+    def test_gsv_cn0_tracking_survives_fix_loss(self) -> None:
+        # Independent of fix state entirely - see record_tracked_satellites.
+        m = self._monitor()
+        m._process_line(self._VALID_GGA)  # noqa: SLF001
+        m._process_line(  # noqa: SLF001
+            "$GPGSV,1,1,01,04,42,298,34*00"
+        )
+        m._process_line(self._NO_FIX_GGA)  # noqa: SLF001
+        assert m.state.has_fix is False
+        assert m.state.tracked_cn0_dbhz(time.monotonic()) == (34,)

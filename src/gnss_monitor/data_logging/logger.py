@@ -96,6 +96,7 @@ def _extract_parsed_fields(message: object) -> dict:
             num_satellites=message.num_satellites,
             hdop=message.hdop,
             speed_mps=None,
+            sentence_utc_time=message.utc_time,
         )
     if isinstance(message, RMCMessage):
         return dict(
@@ -105,6 +106,7 @@ def _extract_parsed_fields(message: object) -> dict:
             num_satellites=None,
             hdop=None,
             speed_mps=message.speed_mps,
+            sentence_utc_time=message.utc_time,
         )
     return dict(
         latitude_deg=None,
@@ -113,6 +115,7 @@ def _extract_parsed_fields(message: object) -> dict:
         num_satellites=None,
         hdop=None,
         speed_mps=None,
+        sentence_utc_time=None,
     )
 
 
@@ -229,6 +232,7 @@ class DataLogger:
         hdop: Optional[float],
         num_satellites: Optional[int],
         avg_cn0_dbhz: Optional[float],
+        last_fix_utc: Optional[str],
         triggered_rules: str,
     ) -> None:
         """Write one snapshot row, throttled to the configured interval.
@@ -264,6 +268,7 @@ class DataLogger:
                 hdop=hdop,
                 num_satellites=num_satellites,
                 avg_cn0_dbhz=avg_cn0_dbhz,
+                last_fix_utc=last_fix_utc,
                 triggered_rules=triggered_rules,
             )
         )

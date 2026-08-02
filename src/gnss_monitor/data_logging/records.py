@@ -35,6 +35,14 @@ class ParsedMessageRecord:
     computed from this exact sentence - see DataLogger.update_receiver_
     context(). They are None whenever analysis is not configured or no
     value has been computed yet.
+
+    sentence_utc_time is this exact sentence's own UTC field (GGA/RMC
+    only; None otherwise), independent of fix validity - unlike
+    ReceiverState.last_fix_utc, which only updates on a valid fix, this
+    is the receiver's raw clock reading whether or not it currently has
+    a fix. It is the receiver-side half of a clock-drift check: diff it
+    against `timestamp` (the Pi's wall clock) to detect Pi clock drift
+    or a clock reset without having to grep the raw NMEA archive by hand.
     """
 
     receiver_id: str
@@ -47,6 +55,7 @@ class ParsedMessageRecord:
     num_satellites: Optional[int]
     hdop: Optional[float]
     speed_mps: Optional[float]
+    sentence_utc_time: Optional[str]
     avg_cn0_dbhz: Optional[float]
     analysis_score: Optional[float]
     analysis_state: Optional[str]
@@ -60,6 +69,12 @@ class SnapshotRecord:
     triggered rules) on a single timestamp, which is what makes this the
     most convenient dataset for offline tooling - no need to join two
     files by nearest timestamp.
+
+    last_fix_utc mirrors ReceiverState.last_fix_utc: the UTC field from
+    the receiver's last valid fix, independent of the Pi's own wall
+    clock. Same clock-drift use as ParsedMessageRecord.sentence_utc_time
+    (diff it against `timestamp`), just sampled once per interval tick
+    instead of once per sentence.
     """
 
     receiver_id: str
@@ -77,4 +92,5 @@ class SnapshotRecord:
     hdop: Optional[float]
     num_satellites: Optional[int]
     avg_cn0_dbhz: Optional[float]
+    last_fix_utc: Optional[str]
     triggered_rules: str

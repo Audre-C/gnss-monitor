@@ -217,22 +217,50 @@ class ReceiverMonitor:
         self._apply(message)
 
     def _apply(self, message: object) -> None:
-        """Update state from a parsed message (latest valid wins)."""
+        """Update state from a parsed message (latest valid wins).
+
+        A GGA/RMC that reports no valid fix is itself a valid, current
+        observation - "the receiver has no fix right now" - and must
+        overwrite has_fix/position, not leave them latched at a stale
+        True from whenever a fix was last held. Before this fix, has_fix
+        could only ever be set to True: a receiver that genuinely lost
+        its fix kept reporting a stale position as OK, which silently
+        defeated the no_fix scoring rule (analysis.rules.no_fix) and any
+        position-based rule that gates on has_fix.
+
+        num_satellites/hdop are updated from every GGA regardless of fix
+        validity (a real receiver reports both even at fix_quality 0),
+        so hdop_anomaly/satellite_anomaly - which do NOT gate on has_fix
+        - see the actual reception-quality reading that explains a fix
+        loss, not a frozen pre-loss value. last_fix_utc deliberately
+        keeps updating only on a valid fix: it feeds
+        analysis.rules.time_discontinuity, which is specifically about
+        jumps in the receiver's own fix timeline, not about the wall
+        clock or acquisition timing - see gnss_monitor.data_logging for
+        that (records the raw per-sentence UTC field independently).
+        """
         if isinstance(message, GGAMessage):
+            self.state.fix_quality = message.fix_quality
+            if message.num_satellites is not None:
+                self.state.num_satellites = message.num_satellites
+            if message.hdop is not None:
+                self.state.hdop = message.hdop
             if (
                 message.has_fix
                 and message.latitude_deg is not None
                 and message.longitude_deg is not None
             ):
                 self.state.has_fix = True
-                self.state.fix_quality = message.fix_quality
                 self.state.latitude_deg = message.latitude_deg
                 self.state.longitude_deg = message.longitude_deg
                 self.state.altitude_m = message.altitude_m
-                self.state.num_satellites = message.num_satellites
-                self.state.hdop = message.hdop
                 if message.utc_time is not None:
                     self.state.last_fix_utc = message.utc_time
+            else:
+                self.state.has_fix = False
+                self.state.latitude_deg = None
+                self.state.longitude_deg = None
+                self.state.altitude_m = None
         elif isinstance(message, RMCMessage):
             if (
                 message.is_valid
@@ -246,6 +274,11 @@ class ReceiverMonitor:
                     self.state.speed_mps = message.speed_mps
                 if message.utc_time is not None:
                     self.state.last_fix_utc = message.utc_time
+            else:
+                self.state.has_fix = False
+                self.state.latitude_deg = None
+                self.state.longitude_deg = None
+                self.state.speed_mps = None
         elif isinstance(message, GSVMessage):
             # Independent of GGA/RMC and of fix state entirely: satellites
             # in view are reported whether or not the receiver currently

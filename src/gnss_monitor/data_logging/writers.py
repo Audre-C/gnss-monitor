@@ -149,6 +149,7 @@ class ParsedCsvWriter(_DailyCsvWriter):
         "satellites",
         "hdop",
         "speed",
+        "sentence_utc",
         "average_cn0",
         "analysis_score",
         "analysis_state",
@@ -167,6 +168,7 @@ class ParsedCsvWriter(_DailyCsvWriter):
                 _blank_if_none(record.num_satellites),
                 _blank_if_none(record.hdop),
                 _blank_if_none(record.speed_mps),
+                record.sentence_utc_time or "",
                 _blank_if_none(record.avg_cn0_dbhz),
                 _blank_if_none(record.analysis_score),
                 record.analysis_state or "",
@@ -194,6 +196,7 @@ class SnapshotCsvWriter(_DailyCsvWriter):
         "hdop",
         "satellites",
         "average_cn0",
+        "last_fix_utc",
         "triggered_rules",
     )
 
@@ -214,6 +217,7 @@ class SnapshotCsvWriter(_DailyCsvWriter):
                 _blank_if_none(record.hdop),
                 _blank_if_none(record.num_satellites),
                 _blank_if_none(record.avg_cn0_dbhz),
+                record.last_fix_utc or "",
                 record.triggered_rules,
             ),
             record.t_wall,

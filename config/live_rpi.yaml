@@ -147,13 +147,13 @@ analysis:
 # unattended run. Plain files only - see gnss_monitor.data_logging's
 # module docstring for the full design rationale.
 data_logging:
-  enabled: false
+  enabled: true
   raw_nmea:
-    enabled: false
+    enabled: true
   parsed:
-    enabled: false
+    enabled: true
   snapshot:
-    enabled: false
+    enabled: true
     interval_s: 1.0
   directory: logs/data
-  rotate_daily: false
+  rotate_daily: true

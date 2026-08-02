@@ -96,6 +96,7 @@ class TestDisabledByDefault:
             hdop=None,
             num_satellites=None,
             avg_cn0_dbhz=None,
+            last_fix_utc=None,
             triggered_rules="",
         )
         logger.close()
@@ -180,12 +181,12 @@ class TestParsedMessageLogging:
         assert rows[0] == [
             "timestamp", "receiver", "sentence", "talker", "latitude",
             "longitude", "fix", "satellites", "hdop", "speed",
-            "average_cn0", "analysis_score", "analysis_state",
+            "sentence_utc", "average_cn0", "analysis_score", "analysis_state",
         ]
         assert rows[1] == [
             "2026-07-29T12:31:22.315Z", "r1", "GGA", "GP",
             "25.334373", "51.469359", "True", "8", "0.9", "",
-            "39.42", "40.0", "Warning",
+            "123122.00", "39.42", "40.0", "Warning",
         ]
 
     def test_unrecognised_message_type_leaves_fields_blank(
@@ -199,7 +200,7 @@ class TestParsedMessageLogging:
 
         rows = _read_csv(tmp_path, "parsed.csv")
         assert rows[1][2] == "GSV"
-        assert rows[1][4:10] == ["", "", "", "", "", ""]
+        assert rows[1][4:11] == ["", "", "", "", "", "", ""]
 
     def test_disabled_sub_logger_writes_nothing(self, tmp_path: Path) -> None:
         config = enabled_config(tmp_path, raw=False, parsed=False, snapshot=True)
@@ -229,6 +230,7 @@ class TestSnapshotLogging:
             hdop=0.9,
             num_satellites=8,
             avg_cn0_dbhz=39.42,
+            last_fix_utc="123122.00",
             triggered_rules="Position Offset +40 (distance=1243m)",
         )
         logger.close()
@@ -238,7 +240,9 @@ class TestSnapshotLogging:
             "timestamp", "receiver", "constellation", "health",
             "analysis_state", "score",
         ]
+        assert rows[0][-2:] == ["last_fix_utc", "triggered_rules"]
         assert rows[1][1:6] == ["NEO-6M", "GPS", "OK", "Warning", "40.0"]
+        assert rows[1][-2] == "123122.00"
         assert rows[1][-1] == "Position Offset +40 (distance=1243m)"
 
     def test_missing_values_are_blank(self, tmp_path: Path) -> None:
@@ -259,13 +263,14 @@ class TestSnapshotLogging:
             hdop=None,
             num_satellites=None,
             avg_cn0_dbhz=None,
+            last_fix_utc=None,
             triggered_rules="",
         )
         logger.close()
 
         rows = _read_csv(tmp_path, "snapshot.csv")
         assert rows[1][4:6] == ["", ""]
-        assert rows[1][6:14] == ["", "", "", "", "", "", "", ""]
+        assert rows[1][6:15] == ["", "", "", "", "", "", "", "", ""]
 
     def test_interval_throttles_writes_per_receiver(self, tmp_path: Path) -> None:
         config = enabled_config(tmp_path, raw=False, parsed=False, interval_s=0.05)
@@ -274,7 +279,8 @@ class TestSnapshotLogging:
             name="NEO-6M", constellation="GPS", health="OK", analysis_state=None,
             score=None, latitude_deg=None, longitude_deg=None,
             distance_from_expected_m=None, speed_mps=None, has_fix=None,
-            hdop=None, num_satellites=None, avg_cn0_dbhz=None, triggered_rules="",
+            hdop=None, num_satellites=None, avg_cn0_dbhz=None,
+            last_fix_utc=None, triggered_rules="",
         )
         logger.record_snapshot("r1", **kwargs)
         logger.record_snapshot("r1", **kwargs)  # within interval: dropped
@@ -292,7 +298,8 @@ class TestSnapshotLogging:
             "r1", name="N", constellation="-", health="OK", analysis_state=None,
             score=None, latitude_deg=None, longitude_deg=None,
             distance_from_expected_m=None, speed_mps=None, has_fix=None,
-            hdop=None, num_satellites=None, avg_cn0_dbhz=None, triggered_rules="",
+            hdop=None, num_satellites=None, avg_cn0_dbhz=None,
+            last_fix_utc=None, triggered_rules="",
         )
         logger.close()
         assert not any(tmp_path.rglob("snapshot.csv"))

@@ -517,6 +517,12 @@ class LiveController:
             hdop=snap.state.hdop if fresh else None,
             num_satellites=snap.state.num_satellites if fresh else None,
             avg_cn0_dbhz=avg_cn0,
+            # Deliberately NOT gated by `fresh`, same reasoning as
+            # last_update_wall in LiveRow: "the last GNSS time we heard
+            # was X" is useful diagnostic context precisely when the
+            # receiver has since gone stale/offline, for clock-drift
+            # comparison against the wall-clock `timestamp` column.
+            last_fix_utc=snap.state.last_fix_utc,
             triggered_rules=(
                 _format_triggered_rules(analysis.triggered_rules)
                 if analysis is not None
